@@ -42,15 +42,18 @@ def ldapAttr(ln, attr):
     return ans
 
 
-
 class ldapGroup:
-    def __init__(self):
+    def __init__(self, lines):
         self.cn = None
         self.mailAddr = None
-        self.userList = []
-    def __init__(self, lines):
-        self.cn = ldapAttr(lines[0], "cn")[0]
-        self.mailAddr = ldapParse(lines, "mailAddress")[0]
+        cn = ldapAttr(lines[0], "cn")
+        if cn:
+            self.cn = cn[0]
+        else:
+            print("ERROR: No cn= in %s" % lines[0])
+        mailAddr = ldapParse(lines, "mailAddress")
+        if mailAddr and mailAddr[0] != "None":
+            self.mailAddr = mailAddr[0]
         users = ldapParse(lines, "users")
         self.userList = []
         if users:
@@ -71,3 +74,27 @@ class mList:
         self.mlName = None
         self.mlMembers = []
 
+def main(argv):
+    f = subprocess.Popen(("%s" % udmBin,"groups/group", "list"), text = True, stdout = subprocess.PIPE)
+    lines = list(map(lambda x: x.rstrip('\n'), f.stdout.readlines()))
+    if f.wait():
+        return 1
+    groups = []
+    last = 0
+    for lno in range(0, len(lines)):
+        if not lines[lno]:
+            if lno == last:
+                last += 1
+            else:
+                groups.append(ldapGroup(lines[last:lno]))
+                last = lno+1
+    if len(lines) and last != len(lines):
+        groups.append(ldapGroup(lines[last:]))
+    for lg in groups:
+        if lg.mailAddr is not None:
+            print("LDAP(%s): %s\n %s" % (lg.cn, lg.mailAddr, lg.userList))
+    return 0
+
+
+if __name__ == "__main__":
+    main(sys.argv)
