@@ -12,6 +12,7 @@ mailmanBin = "/usr/lib/mailman3/bin/mailman"
 udmBin = "/usr/sbin/udm"
 
 def ldapParse(lns, attr):
+    "Search lines in lns for LDAP attribute attr: and return array"
     ans = []
     srch = " %s: " % attr
     for ln in lns:
@@ -24,6 +25,7 @@ def ldapParse(lns, attr):
     return ans
 
 def ldapAttr(ln, attr):
+    "Search line for attribute attr=[...], return array"
     ans = []
     srch = "%s=" % attr
     assert(srch in ln)
@@ -43,6 +45,7 @@ def ldapAttr(ln, attr):
 
 
 class ldapGroup:
+    "Representation of LDAP group"
     def __init__(self, lines):
         self.cn = None
         self.mailAddr = None
@@ -93,6 +96,9 @@ def main(argv):
     for lg in groups:
         if lg.mailAddr is not None:
             print("LDAP(%s): %s\n %s" % (lg.cn, lg.mailAddr, lg.userList))
+    # TODO:
+    # Read LDAP users for mail aliases (whiteliste)
+    # Read existing MLs and determine needed changes
     return 0
 
 
