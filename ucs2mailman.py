@@ -7,6 +7,8 @@
 #
 
 import os, sys, subprocess, re
+#from operator import methodcaller, attrgetter
+import bisect
 
 mailmanBin = "/usr/lib/mailman3/bin/mailman"
 udmBin = "/usr/sbin/udm"
@@ -65,19 +67,33 @@ class ldapGroup:
 
 
 class ldapUser:
-    def __init__(self):
-        self.uid = None
-        self.dName = None
-        self.primMail = None
+    def __init__(self, lines):
+        self.uid = ldapAttr(lines[0], "uid")[0]
+        self.primMail = self.uid + "@" + str.join(".", ldapAttr(lines[0], "dc"))
+        self.dname = ldapParse(lines, "displayName")
         self.mails = []
         self.groups = []
+        self.mails.append(ldapParse(lines, "PasswordRecoveryEmail")[0])
+        for mail in ldapParse(lines, "e-mail"):
+            if not mail in self.mails:
+                self.mails.append(mail)
+        mail = ldapParse(lines, "mailForwardAddress")
+        if mail and not mail[0] in self.mails:
+            self.mails.append(mail[0])
+        groups = ldapParse(lines, "groups")
+        for gr in groups:
+            self.groups.append(ldapAttr(gr, "cn")[0])
+    def sortKey(self):
+        return self.primMail.lower()
+
 
 class mList:
     def __init__(self):
         self.mlName = None
         self.mlMembers = []
 
-def main(argv):
+
+def collectGroups():
     f = subprocess.Popen(("%s" % udmBin,"groups/group", "list"), text = True, stdout = subprocess.PIPE)
     lines = list(map(lambda x: x.rstrip('\n'), f.stdout.readlines()))
     if f.wait():
@@ -93,11 +109,50 @@ def main(argv):
                 last = lno+1
     if len(lines) and last != len(lines):
         groups.append(ldapGroup(lines[last:]))
-    for lg in groups:
-        if lg.mailAddr is not None:
-            print("LDAP(%s): %s\n %s" % (lg.cn, lg.mailAddr, lg.userList))
-    # TODO:
-    # Read LDAP users for mail aliases (whiteliste)
+    return filter(lambda x: x.mailAddr is not None, groups)
+
+def collectUsers():
+    f = subprocess.Popen(("%s" % udmBin,"users/user", "list"), text = True, stdout = subprocess.PIPE)
+    lines = list(map(lambda x: x.rstrip('\n'), f.stdout.readlines()))
+    if f.wait():
+        return 1
+    users = []
+    last = 0
+    for lno in range(0, len(lines)):
+        if not lines[lno]:
+            if lno == last:
+                last += 1
+            else:
+                users.append(ldapUser(lines[last:lno]))
+                last = lno+1
+    if len(lines) and last != len(lines):
+        users.append(ldapUser(lines[last:]))
+    return sorted(users, key = ldapUser.sortKey)
+
+def findUser(userList, primMail):
+    #sList = map(lambda x: x.sortKey(), userList)
+    primMail = primMail.lower()
+    sList = [u.sortKey() for u in userList]
+    ix = bisect.bisect_left(sList, primMail)
+    if ix == len(sList) or sList[ix] != primMail:
+        return None
+    return userList[ix]
+
+def main(argv):
+    lGroups = collectGroups()
+    lUsers = collectUsers()
+    # Debugging: Dump info
+    for lg in lGroups:
+        assert(lg.mailAddr is not None)
+        print("LDAP(%s): %s" % (lg.cn, lg.mailAddr))
+        for us in lg.userList:
+            uMails = []
+            user = findUser(lUsers, us)
+            if user:
+                uMails = user.mails
+            print(" %s: %s" % (us, uMails))
+        print()
+
     # Read existing MLs and determine needed changes
     return 0
 
