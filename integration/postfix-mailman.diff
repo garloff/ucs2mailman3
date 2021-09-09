@@ -18,8 +18,8 @@
  
  Type: multifile
 --- /dev/null	2021-08-26 17:06:32.476000000 +0200
-+++ /etc/univention/templates/files/etc/postfix/main.cf.d/90_mailman3	2021-09-08 13:26:55.770751057 +0200
-@@ -0,0 +1,47 @@
++++ /etc/univention/templates/files/etc/postfix/main.cf.d/90_mailman3	2021-09-10 01:03:55.646714306 +0200
+@@ -0,0 +1,46 @@
 +@!@
 +import re
 +print("""# Support the default VERP delimiter.
@@ -48,22 +48,21 @@
 +	default_virtual_domains = 'ldap:/etc/postfix/ldap.virtualdomains'
 +
 +	virtual_mailbox_domains = re.split(',\s*', configRegistry.get('mail/postfix/virtual/mailbox/domains', default_virtual_domains ))
-+	virtual_mailbox_domains.append('hash:/var/lib/mailman3/data/postfix_domains')
++	virtual_mailbox_domains.insert(0, 'hash:/var/lib/mailman3/data/postfix_domains')
 +	print('\nvirtual_mailbox_domains = %s' % ',\n        '.join(virtual_mailbox_domains))
 +
 +	virtual_mailbox_maps = re.split(',\s*', configRegistry.get('mail/postfix/virtual/mailbox/maps', default_virtual_mailbox_maps))
 +	if 'ldap' in val:
 +		virtual_mailbox_maps.append('ldap:/etc/postfix/ldap.virtualwithcanonical')
-+	virtual_mailbox_maps.append('hash:/var/lib/mailman3/data/postfix_lmtp')
++	virtual_mailbox_maps.insert(0, 'hash:/var/lib/mailman3/data/postfix_lmtp')
 +	print('\nvirtual_mailbox_maps = %s' % ',\n        '.join(virtual_mailbox_maps))
-+	print('\nvirtual_transport = %s' % (configRegistry.get('mail/postfix/virtual/transport', 'lmtp:127.0.0.1:2003')
-+		+ ', hash:/var/lib/mailman3/data/postfix_lmtp'))
 +else:
-+	transport_maps = re.split(',\s*', configRegistry.get('mail/postfix/maps/transport', 'hash:/etc/postfix/transport' ))
-+	if configRegistry.is_true('mail/postfix/transport/ldap/enabled',False):
-+		transport_maps.append('ldap:/etc/postfix/ldap.transport')
-+	transport_maps.insert(0, 'hash:/var/lib/mailman3/data/postfix_lmtp')
-+	print('transport_maps = %s' % ',\n        '.join(transport_maps))
 +	print('local_recipient_maps = hash:/var/lib/mailman3/data/postfix_lmtp')
++
++transport_maps = re.split(',\s*', configRegistry.get('mail/postfix/maps/transport', 'hash:/etc/postfix/transport' ))
++if configRegistry.is_true('mail/postfix/transport/ldap/enabled',False):
++	transport_maps.append('ldap:/etc/postfix/ldap.transport')
++transport_maps.insert(0, 'hash:/var/lib/mailman3/data/postfix_lmtp')
++print('transport_maps = %s' % ',\n        '.join(transport_maps))
 +
 +@!@
