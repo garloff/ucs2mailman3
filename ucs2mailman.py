@@ -205,10 +205,12 @@ def reconcile(lGroups, lUsers, mLists):
         # (1) Create new lists from LDAP Groups
         if lg.mailAddr not in mListDict:
             print("Mailing list %s missing" % lg.mailAddr)
+            # TODO
             #  (1a) Create ML with useful defaults
             #  (1b) Add members
             #  (1c) Add nonMembers
         else:
+            # TODO: NEEDS TESTING
             # (2) For existing lists:
             ml = mListDict(lg.mailAddr)
             for luser in lg.userList:
@@ -227,12 +229,31 @@ def reconcile(lGroups, lUsers, mLists):
     # Note: Extra lists are OK
     pass
 
+def usage():
+    print("Usage: ucs2mailman.py [-d] [-t DOMAIN]")
+    print("(c) Kurt Garloff <garloff@osb-alliance.com>, 9/2021, AGPL-v3")
+    print("ucs2mailman.py calls udm to get lists of groups and users from UCS LDAP.")
+    print("It then gets the mailing list with subscribers and nonMembers from Mailman3.")
+    print("It then ensures that all LDAP groups with mailAddress have a corresponding")
+    print("MailMan3 mailing list (ML) and that all group members are subscribed to it")
+    print("and all other known mail addresses from subscribers are added as non-members")
+    print("to allow them to have unmoderated posting. Extra subscribers (not in LDAP group)")
+    print("will be removed, extra non-members are left alone. Extra lists are also left alone.")
+    print("Note that you will typically need to run this as root (with sudo).")
+    print("Options: -d => debug output")
+    print(" -t DOMAIN  => replace mailAddress domain with DOMAIN for the ML")
+    sys.exit(0)
+
 def main(argv):
     global debug
     translate = None
+    # TODO: Use getopt
+    #  Option -n for not doing any option, just printing what would be done
     if len(argv) > 1 and argv[1] == "-d":
         debug = True
         argv = argv[1:]
+    if len(argv) > 1 and argv[1] == "-h":
+        usage()
     if len(argv) > 2 and argv[1] == "-t":
         translate = argv[2]
         argv = argv[2:]
