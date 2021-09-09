@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: AGPL-3
 #
 
-import os, sys, subprocess, re
+import os, sys, subprocess, re, getopt
 from operator import methodcaller, attrgetter
 import bisect
 
@@ -96,7 +96,7 @@ class ldapUser:
     def __init__(self, lines):
         self.uid = ldapAttr(lines[0], "uid")[0]
         self.primMail = self.uid + "@" + str.join(".", ldapAttr(lines[0], "dc"))
-        self.dName = ldapParse(lines, "displayName")
+        self.dName = ldapParse(lines, "displayName")[0]
         self.mails = []
         self.groups = []
         self.mails.append(ldapParse(lines, "PasswordRecoveryEmail")[0])
@@ -198,6 +198,13 @@ def collectMMLists():
             lists.append(mList(ml))
     return lists
 
+def getML(adr):
+    for domain in domManager:
+        for ml in domain.mailing_lists:
+            if ml.posting_address == adr:
+                return ml
+    return None
+
 def allMails(lUsers, userMail):
     "return list of extra mails from user"
     user = findUser(lUsers, userMail)
@@ -217,6 +224,7 @@ def createML(lGroup):
     #domName = lGroup.mailAddr[lGroup.mailAddr.find("@")+1:]
     #domain = domManager[domName]
     mList = create_list(lGroup.mailAddr)
+    assert(mList)
     getUtility(IStyleManager).get('legacy-default').apply(mList)
     mList.subscription_policy = SubscriptionPolicy.open
     # admin MUST exist (and have confirmed mailaddress)
@@ -243,8 +251,8 @@ def mlSubscribe(ml, mAddr, dName):
     if not user:
         user = userManager.make_user(mAddr, dName)
     preferred = list(user.addresses)[0]
-    user.preferred_address = preferred
     preferred.verified_on = now()
+    user.preferred_address = preferred
     ml.subscription_policy = SubscriptionPolicy.open
     ml.subscribe(user, MemberRole.member)
     ml.subscription_policy = SubscriptionPolicy.moderate
@@ -254,7 +262,7 @@ def mlAddSubscription(ml, mainAddr, addtlAddr):
     global userManager
     if not userManager:
         userManager = getUtility(IUserManager)
-    mainUser = mmUser(mainAddr)
+    mainUser = userManager.get_user(mainAddr)
     newAddr = userManager.get_address(addtlAddr)
     if not newAddr:
         newAddr = userManager.create_address(addtlAddr)
@@ -270,6 +278,7 @@ def reconcile(lGroups, lUsers, mLists):
     mListDict = { x.mlName: x for x in mLists }
     for lg in lGroups:
         ml = None
+        mml = None
         if filterList and lg.mailAddr != filterList:
             continue
         # (1) Create new lists from LDAP Groups
@@ -285,19 +294,20 @@ def reconcile(lGroups, lUsers, mLists):
         else:
             # (2) For existing lists:
             ml = mListDict(lg.mailAddr)
+            mml = getML(lg.mailAddr)
         for luser in lg.userList:
             user = findUser(lUsers, luser)
             #  (2a) Any subscribers (members) missing?
             if luser not in ml.mlMembers:
                 print("Subscriber %s to list %s missing" % (luser, lg.mailAddr))
                 if not testMode2:
-                    mlSubscribe(ml, luser, user.dName)
+                    mlSubscribe(mml, luser, user.dName)
             #  (2b) Any nonMembers (whitelisted posters) missing?
             for addtlMail in allMails(lUsers, luser):
                 if addtlMail not in ml.mlNonMembers:
                     print("Whitelist entry %s (user %s) to list %s missing" % (addtlMail, luser, lg.mailAddr))
                     if not testMode2:
-                        mlAddSubscription(ml, luser, addtlMail)
+                        mlAddSubscription(mml, luser, addtlMail)
         #  (2c) Any extra subscribers (members) that should be removed?
         for member in ml.mlMembers:
             if member not in lg.userList:
@@ -307,7 +317,7 @@ def reconcile(lGroups, lUsers, mLists):
     # Note: Extra lists are OK
     pass
 
-def usage():
+def usage(ret):
     print("Usage: ucs2mailman.py [-d] [-n] [-h] [-a adminMail] [-t DOMAIN] [-f LIST]")
     print("(c) Kurt Garloff <garloff@osb-alliance.com>, 9/2021, AGPL-v3")
     print("ucs2mailman.py calls udm to get lists of groups and users from UCS LDAP.")
@@ -324,34 +334,39 @@ def usage():
     print(" -a adminMail => use this user as owner/moderator for newly created lists (must exist!)")
     print(" -t DOMAIN    => replace mailAddress domain with DOMAIN for the ML")
     print(" -f LIST      => only process mailing list LIST")
-    sys.exit(0)
+    sys.exit(ret)
 
 def main(argv):
     global debug, testMode, testMode2, admin, filterList
     translate = None
     # TODO: Use getopt
-    #  Option -n for not doing any option, just printing what would be done
-    if len(argv) > 1 and argv[1] == "-d":
-        debug = True
-        argv = argv[1:]
-    if len(argv) > 1 and argv[1] == "-h":
-        usage()
-    if len(argv) > 1 and argv[1] == "-n":
-        testMode = True
-        testMode2 = True
-        argv = argv[1:]
-    if len(argv) > 1 and argv[1] == "-N":
-        testMode2 = True
-        argv = argv[1:]
-    if len(argv) > 2 and argv[1] == "-a":
-        admin = argv[2]
-        argv = argv[2:]
-    if len(argv) > 2 and argv[1] == "-t":
-        translate = argv[2]
-        argv = argv[2:]
-    if len(argv) > 2 and argv[1] == "-f":
-        filterList = argv[2]
-        argv = argv[2:]
+    try:
+        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNa:t:f:')
+    except getopt.GetoptError as exc:
+        print(exc)
+        usage(1)
+    for (opt, arg) in optlist:
+        if opt == "-d":
+            debug = True
+            continue
+        if opt == "-h":
+            usage(0)
+        if opt == "-n":
+            testMode = True
+            testMode2 = True
+            continue
+        if opt == "-N":
+            testMode2 = True
+            continue
+        if opt == "-a":
+            admin = arg
+            continue
+        if opt == "-t":
+            translate = arg
+            continue
+        if opt == "-f":
+            filterList = arg
+            continue
 
     lGroups = collectGroups(translate)
     lUsers = collectUsers()
