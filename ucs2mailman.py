@@ -25,6 +25,8 @@ from mailman.version import MAILMAN_VERSION_FULL
 from public import public
 
 from mailman.interfaces.domain import IDomainManager
+#from mailman.interfaces.domain import IMailingList
+from mailman.interfaces.member import MemberRole
 from zope.component import getUtility
 
 
@@ -103,9 +105,18 @@ class ldapUser:
 
 
 class mList:
-    def __init__(self):
-        self.mlName = None
+    def __init__(self, ml):
+        self.mlName = ml.posting_address
         self.mlMembers = []
+        self.mlNonMembers = []
+        members = ml.get_roster(MemberRole.member).members
+        for member in members:
+            self.mlMembers.append(member.address.email)
+        members = ml.get_roster(MemberRole.nonmember).members
+        for member in members:
+            self.mlNonMembers.append(member.address.email)
+    def __repr__(self):
+        return "%s: Members: %s, NonMembers: %s" % (self.mlName, self.mlMembers, self.mlNonMembers)
 
 
 def collectGroups():
@@ -153,6 +164,20 @@ def findUser(userList, primMail):
         return None
     return userList[ix]
 
+# global MM context
+manager = None
+
+def collectMMLists():
+    global manager
+    initialize()
+    manager = getUtility(IDomainManager)
+    lists = []
+    for domain in manager:
+        for ml in domain.mailing_lists:
+            lists.append(mList(ml))
+    return lists
+
+
 def main(argv):
     lGroups = collectGroups()
     lUsers = collectUsers()
@@ -169,47 +194,13 @@ def main(argv):
         print()
 
     # Read existing MLs and determine needed changes
+    mLists = collectMMLists()
+    for ml in mLists:
+        print(ml)
 
     return 0
 
 
-def initialize_config(ctx, param, value):
-    if not ctx.resilient_parsing:
-        initialize(value)
-
-@click.option(
-        '-C', '--config', 'config_file',
-        envvar='MAILMAN_CONFIG_FILE',
-        type=click.Path(exists=True, dir_okay=False, resolve_path=True),
-        help=_("""\     Configuration file to use.  If not given, the environment variable
-            MAILMAN_CONFIG_FILE is consulted and used if set.  If neither are given, a
-            default configuration file is loaded."""),
-        is_eager=True, callback=initialize_config)
-@click.option(
-        '--run-as-root',
-        is_flag=True, default=False,
-        help=_("""\
-                Running mailman commands as root is not recommended and mailman will
-                refuse to run as root unless this option is specified."""))
-@click.pass_context 
-@click.version_option(MAILMAN_VERSION_FULL, message='%(version)s') 
-@public
-def mm_main(ctx, config_file, run_as_root):
-    # XXX https://github.com/pallets/click/issues/303
-    """\
-            The GNU Mailman mailing list management system
-            Copyright 1998-2018 by the Free Software Foundation, Inc.
-            http://www.list.org
-            """
-    # Only run as root if allowed.
-    if os.geteuid() == 0 and not run_as_root:
-        raise click.UsageError(_("""\
-                If you are sure you want to run as root, specify --run-as-root."""))
-    # click handles dispatching to the subcommand via the Subcommands class.
-    if ctx.invoked_subcommand is None:
-        ctx.invoke(help_command)
-    manager = getUtility(IDomainManager)
 
 if __name__ == "__main__":
     main(sys.argv)
-    mm_main(sys.argv)
