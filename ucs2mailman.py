@@ -7,11 +7,28 @@
 #
 
 import os, sys, subprocess, re
-#from operator import methodcaller, attrgetter
+from operator import methodcaller, attrgetter
 import bisect
 
-mailmanBin = "/usr/lib/mailman3/bin/mailman"
+#mailmanBin = "/usr/lib/mailman3/bin/mailman"
 udmBin = "/usr/sbin/udm"
+
+import click
+
+from mailman.config import config
+from mailman.core.i18n import _
+from mailman.core.initialize import initialize
+from mailman.database.transaction import transaction
+from mailman.interfaces.command import ICLISubCommand
+from mailman.utilities.modules import add_components
+from mailman.version import MAILMAN_VERSION_FULL
+from public import public
+
+from mailman.interfaces.domain import IDomainManager
+#from mailman.interfaces.domain import IMailingList
+from mailman.interfaces.member import MemberRole
+from zope.component import getUtility
+
 
 def ldapParse(lns, attr):
     "Search lines in lns for LDAP attribute attr: and return array"
@@ -88,9 +105,18 @@ class ldapUser:
 
 
 class mList:
-    def __init__(self):
-        self.mlName = None
+    def __init__(self, ml):
+        self.mlName = ml.posting_address
         self.mlMembers = []
+        self.mlNonMembers = []
+        members = ml.get_roster(MemberRole.member).members
+        for member in members:
+            self.mlMembers.append(member.address.email)
+        members = ml.get_roster(MemberRole.nonmember).members
+        for member in members:
+            self.mlNonMembers.append(member.address.email)
+    def __repr__(self):
+        return "%s: Members: %s, NonMembers: %s" % (self.mlName, self.mlMembers, self.mlNonMembers)
 
 
 def collectGroups():
@@ -138,6 +164,33 @@ def findUser(userList, primMail):
         return None
     return userList[ix]
 
+# global MM context
+manager = None
+
+def collectMMLists():
+    "Get all mailings lists from Mailman3"
+    global manager
+    initialize()
+    manager = getUtility(IDomainManager)
+    lists = []
+    for domain in manager:
+        for ml in domain.mailing_lists:
+            lists.append(mList(ml))
+    return lists
+
+def reconcile(grps, users, lists):
+    "Reconcile Mailman3 lists with input from LDAP"
+    # Now: Reconciliation steps
+    # (1) Create new lists from LDAP Groups
+    #  (1a) Create ML with useful defaults
+    #  (1b) Add members
+    #  (1c) Add nonMembers
+    # (2) For existing lists:
+    #  (2a) Any subscribers (members) missing?
+    #  (2b) Any nonMembers (whitelisted posters) missing?
+    #  (2c) Any extra subscribers (members) that should be removed?
+    pass
+
 def main(argv):
     lGroups = collectGroups()
     lUsers = collectUsers()
@@ -154,7 +207,14 @@ def main(argv):
         print()
 
     # Read existing MLs and determine needed changes
+    mLists = collectMMLists()
+    for ml in mLists:
+        print(ml)
+
+    reconcile(lGroups, lUsers, mLists)
+
     return 0
+
 
 
 if __name__ == "__main__":
