@@ -33,7 +33,6 @@ from mailman.interfaces.subscriptions import ISubscriptionManager
 from mailman.interfaces.usermanager import IUserManager
 from mailman.interfaces.listmanager import IListManager
 from mailman.interfaces.mailinglist import SubscriptionPolicy
-from mailman.interfaces.usermanager import IUserManager
 from mailman.interfaces.styles import IStyleManager
 from mailman.interfaces.member import MemberRole
 from mailman.app.lifecycle import create_list
@@ -302,7 +301,7 @@ def reconcile(lGroups, lUsers, mLists):
             user = findUser(lUsers, luser)
             #  (2a) Any subscribers (members) missing?
             if luser.lower() not in ml.mlMembers:
-                print("Subscriber %s to list %s missing" % (luser, lg.mailAddr))
+                print("Subscriber %s <%s> to list %s missing" % (user.dName, luser, lg.mailAddr))
                 if not testMode2:
                     mlSubscribe(mml, luser, user.dName)
             #  (2b) Any nonMembers (whitelisted posters) missing?
