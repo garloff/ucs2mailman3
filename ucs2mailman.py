@@ -7,11 +7,26 @@
 #
 
 import os, sys, subprocess, re
-#from operator import methodcaller, attrgetter
+from operator import methodcaller, attrgetter
 import bisect
 
-mailmanBin = "/usr/lib/mailman3/bin/mailman"
+#mailmanBin = "/usr/lib/mailman3/bin/mailman"
 udmBin = "/usr/sbin/udm"
+
+import click
+
+from mailman.config import config
+from mailman.core.i18n import _
+from mailman.core.initialize import initialize
+from mailman.database.transaction import transaction
+from mailman.interfaces.command import ICLISubCommand
+from mailman.utilities.modules import add_components
+from mailman.version import MAILMAN_VERSION_FULL
+from public import public
+
+from mailman.interfaces.domain import IDomainManager
+from zope.component import getUtility
+
 
 def ldapParse(lns, attr):
     "Search lines in lns for LDAP attribute attr: and return array"
@@ -154,8 +169,47 @@ def main(argv):
         print()
 
     # Read existing MLs and determine needed changes
+
     return 0
 
 
+def initialize_config(ctx, param, value):
+    if not ctx.resilient_parsing:
+        initialize(value)
+
+@click.option(
+        '-C', '--config', 'config_file',
+        envvar='MAILMAN_CONFIG_FILE',
+        type=click.Path(exists=True, dir_okay=False, resolve_path=True),
+        help=_("""\     Configuration file to use.  If not given, the environment variable
+            MAILMAN_CONFIG_FILE is consulted and used if set.  If neither are given, a
+            default configuration file is loaded."""),
+        is_eager=True, callback=initialize_config)
+@click.option(
+        '--run-as-root',
+        is_flag=True, default=False,
+        help=_("""\
+                Running mailman commands as root is not recommended and mailman will
+                refuse to run as root unless this option is specified."""))
+@click.pass_context 
+@click.version_option(MAILMAN_VERSION_FULL, message='%(version)s') 
+@public
+def mm_main(ctx, config_file, run_as_root):
+    # XXX https://github.com/pallets/click/issues/303
+    """\
+            The GNU Mailman mailing list management system
+            Copyright 1998-2018 by the Free Software Foundation, Inc.
+            http://www.list.org
+            """
+    # Only run as root if allowed.
+    if os.geteuid() == 0 and not run_as_root:
+        raise click.UsageError(_("""\
+                If you are sure you want to run as root, specify --run-as-root."""))
+    # click handles dispatching to the subcommand via the Subcommands class.
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(help_command)
+    manager = getUtility(IDomainManager)
+
 if __name__ == "__main__":
     main(sys.argv)
+    mm_main(sys.argv)
