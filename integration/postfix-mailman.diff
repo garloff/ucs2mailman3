@@ -1,0 +1,69 @@
+--- univention-mail-postfix.info.orig	2021-09-08 12:29:29.230154997 +0200
++++ /etc/univention/templates/info/univention-mail-postfix.info	2021-09-08 13:18:22.491117814 +0200
+@@ -93,6 +93,16 @@ Variables: mail/archivefolder
+ 
+ Type: subfile
+ Multifile: etc/postfix/main.cf
++Subfile: etc/postfix/main.cf.d/90_mailman3
++Variables: mail/postfix/transport/ldap/enabled
++Variables: mail/postfix/maps/transport
++Variables: mail/postfix/virtual/alias/domains
++Variables: mail/postfix/virtual/mailbox/maps
++Variables: mail/postfix/virtual/transport
++Variables: mail/postfix/virtual/enabled
++
++Type: subfile
++Multifile: etc/postfix/main.cf
+ Subfile: etc/postfix/main.cf.d/99_local
+ 
+ Type: multifile
+--- /dev/null	2021-08-26 17:06:32.476000000 +0200
++++ /etc/univention/templates/files/etc/postfix/main.cf.d/90_mailman3	2021-09-08 13:26:55.770751057 +0200
+@@ -0,0 +1,47 @@
++@!@
++import re
++print("""# Support the default VERP delimiter.
++recipient_delimiter = +
++unknown_local_recipient_reject_code = 550
++owner_request_special = no
++#transport_maps =
++#    hash:/var/lib/mailman3/data/postfix_lmtp
++#local_recipient_maps =
++#    hash:/var/lib/mailman3/data/postfix_lmtp
++#relay_domains =
++#    hash:/var/lib/mailman3/data/postfix_domains""")
++
++
++# COPIED from 30_maps and extended for mailman -- virtual_alias_maps pieces taken out
++val = re.split('[, ]+', configRegistry.get('mail/maps/canonical/sender/enable',''))
++if configRegistry.is_true('mail/postfix/virtual/enabled', False):
++	default_virtual_mailbox_maps = 'ldap:/etc/postfix/ldap.virtual_mailbox, ldap:/etc/postfix/ldap.sharedfolderlocal'
++	# Bug #45205: adding mailbox_maps to alias_maps, so both will be together in the unionmap below
++	use_unionmap_in_virtual_alias_maps = configRegistry.is_true('mail/postfix/activate_unionmap_in_virtual_alias_maps', False)
++	if use_unionmap_in_virtual_alias_maps:
++		default_virtual_alias_maps = 'hash:/etc/postfix/virtual, ldap:/etc/postfix/ldap.groups, ldap:/etc/postfix/ldap.distlist, ldap:/etc/postfix/ldap.virtual, ldap:/etc/postfix/ldap.external_aliases, ldap:/etc/postfix/ldap.sharedfolderremote, ldap:/etc/postfix/ldap.sharedfolderlocal_aliases, {}'.format(default_virtual_mailbox_maps)
++	else:
++		default_virtual_alias_maps = 'hash:/etc/postfix/virtual, ldap:/etc/postfix/ldap.groups, ldap:/etc/postfix/ldap.distlist, ldap:/etc/postfix/ldap.virtual, ldap:/etc/postfix/ldap.external_aliases, ldap:/etc/postfix/ldap.sharedfolderremote, ldap:/etc/postfix/ldap.sharedfolderlocal_aliases'
++
++	default_virtual_domains = 'ldap:/etc/postfix/ldap.virtualdomains'
++
++	virtual_mailbox_domains = re.split(',\s*', configRegistry.get('mail/postfix/virtual/mailbox/domains', default_virtual_domains ))
++	virtual_mailbox_domains.append('hash:/var/lib/mailman3/data/postfix_domains')
++	print('\nvirtual_mailbox_domains = %s' % ',\n        '.join(virtual_mailbox_domains))
++
++	virtual_mailbox_maps = re.split(',\s*', configRegistry.get('mail/postfix/virtual/mailbox/maps', default_virtual_mailbox_maps))
++	if 'ldap' in val:
++		virtual_mailbox_maps.append('ldap:/etc/postfix/ldap.virtualwithcanonical')
++	virtual_mailbox_maps.append('hash:/var/lib/mailman3/data/postfix_lmtp')
++	print('\nvirtual_mailbox_maps = %s' % ',\n        '.join(virtual_mailbox_maps))
++	print('\nvirtual_transport = %s' % (configRegistry.get('mail/postfix/virtual/transport', 'lmtp:127.0.0.1:2003')
++		+ ', hash:/var/lib/mailman3/data/postfix_lmtp'))
++else:
++	transport_maps = re.split(',\s*', configRegistry.get('mail/postfix/maps/transport', 'hash:/etc/postfix/transport' ))
++	if configRegistry.is_true('mail/postfix/transport/ldap/enabled',False):
++		transport_maps.append('ldap:/etc/postfix/ldap.transport')
++	transport_maps.insert(0, 'hash:/var/lib/mailman3/data/postfix_lmtp')
++	print('transport_maps = %s' % ',\n        '.join(transport_maps))
++	print('local_recipient_maps = hash:/var/lib/mailman3/data/postfix_lmtp')
++
++@!@
