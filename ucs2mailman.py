@@ -168,6 +168,7 @@ def findUser(userList, primMail):
 manager = None
 
 def collectMMLists():
+    "Get all mailings lists from Mailman3"
     global manager
     initialize()
     manager = getUtility(IDomainManager)
@@ -177,6 +178,18 @@ def collectMMLists():
             lists.append(mList(ml))
     return lists
 
+def reconcile(grps, users, lists):
+    "Reconcile Mailman3 lists with input from LDAP"
+    # Now: Reconciliation steps
+    # (1) Create new lists from LDAP Groups
+    #  (1a) Create ML with useful defaults
+    #  (1b) Add members
+    #  (1c) Add nonMembers
+    # (2) For existing lists:
+    #  (2a) Any subscribers (members) missing?
+    #  (2b) Any nonMembers (whitelisted posters) missing?
+    #  (2c) Any extra subscribers (members) that should be removed?
+    pass
 
 def main(argv):
     lGroups = collectGroups()
@@ -197,6 +210,8 @@ def main(argv):
     mLists = collectMMLists()
     for ml in mLists:
         print(ml)
+
+    reconcile(lGroups, lUsers, mLists)
 
     return 0
 
