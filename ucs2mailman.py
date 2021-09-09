@@ -13,7 +13,7 @@ import bisect
 #mailmanBin = "/usr/lib/mailman3/bin/mailman"
 udmBin = "/usr/sbin/udm"
 
-import click
+debug = False
 
 from mailman.config import config
 from mailman.core.i18n import _
@@ -119,7 +119,14 @@ class mList:
         return "%s: Members: %s, NonMembers: %s" % (self.mlName, self.mlMembers, self.mlNonMembers)
 
 
-def collectGroups():
+def replDomain(email, newdom):
+    "return email with the domain replaced by newdom"
+    domix = email.find("@")
+    assert(domix > 0)
+    return email[:domix+1] + newdom
+
+
+def collectGroups(translate):
     f = subprocess.Popen(("%s" % udmBin,"groups/group", "list"), text = True, stdout = subprocess.PIPE)
     lines = list(map(lambda x: x.rstrip('\n'), f.stdout.readlines()))
     if f.wait():
@@ -135,7 +142,11 @@ def collectGroups():
                 last = lno+1
     if len(lines) and last != len(lines):
         groups.append(ldapGroup(lines[last:]))
-    return filter(lambda x: x.mailAddr is not None, groups)
+    groups = list(filter(lambda x: x.mailAddr is not None, groups))
+    if translate:
+        for g in groups:
+            g.mailAddr = replDomain(g.mailAddr, translate)
+    return groups
 
 def collectUsers():
     f = subprocess.Popen(("%s" % udmBin,"users/user", "list"), text = True, stdout = subprocess.PIPE)
@@ -178,38 +189,72 @@ def collectMMLists():
             lists.append(mList(ml))
     return lists
 
-def reconcile(grps, users, lists):
+def allMails(lUsers, userMail):
+    "return list of extra mails from user"
+    user = findUser(lUsers, userMail)
+    if user:
+        return user.mails
+    else:
+        return []
+
+def reconcile(lGroups, lUsers, mLists):
     "Reconcile Mailman3 lists with input from LDAP"
     # Now: Reconciliation steps
-    # (1) Create new lists from LDAP Groups
-    #  (1a) Create ML with useful defaults
-    #  (1b) Add members
-    #  (1c) Add nonMembers
-    # (2) For existing lists:
-    #  (2a) Any subscribers (members) missing?
-    #  (2b) Any nonMembers (whitelisted posters) missing?
-    #  (2c) Any extra subscribers (members) that should be removed?
+    mListDict = { x.mlName: x for x in mLists }
+    for lg in lGroups:
+        # (1) Create new lists from LDAP Groups
+        if lg.mailAddr not in mListDict:
+            print("Mailing list %s missing" % lg.mailAddr)
+            #  (1a) Create ML with useful defaults
+            #  (1b) Add members
+            #  (1c) Add nonMembers
+        else:
+            # (2) For existing lists:
+            ml = mListDict(lg.mailAddr)
+            for luser in lg.userList:
+                #  (2a) Any subscribers (members) missing?
+                if luser not in ml.mlMembers:
+                    print("Subscriber %s to list %s missing" % (luser, lg.mailAddr))
+                #  (2b) Any nonMembers (whitelisted posters) missing?
+                for addtlMail in allMails(lUsers, luser):
+                    if addtlMail not in ml.mlNonMembers:
+                        print("Whitelist entry %s (user %s) to list %s missing" % (addtlMail, luser, lg.mailAddr))
+            #  (2c) Any extra subscribers (members) that should be removed?
+            for member in ml.mlMembers:
+                if member not in lg.userList:
+                    print("Subscriber %s should be removed from list %s" % (member, lg.mailAddr))
+            # Note: Extra nonMembers are OK
+    # Note: Extra lists are OK
     pass
 
 def main(argv):
-    lGroups = collectGroups()
+    global debug
+    translate = None
+    if len(argv) > 1 and argv[1] == "-d":
+        debug = True
+        argv = argv[1:]
+    if len(argv) > 2 and argv[1] == "-t":
+        translate = argv[2]
+        argv = argv[2:]
+
+    lGroups = collectGroups(translate)
     lUsers = collectUsers()
     # Debugging: Dump info
     for lg in lGroups:
         assert(lg.mailAddr is not None)
-        print("LDAP(%s): %s" % (lg.cn, lg.mailAddr))
+        if debug:
+            print("LDAP(%s): %s" % (lg.cn, lg.mailAddr))
         for us in lg.userList:
-            uMails = []
-            user = findUser(lUsers, us)
-            if user:
-                uMails = user.mails
-            print(" %s: %s" % (us, uMails))
-        print()
+            if debug:
+                print(" %s: %s" % (us, allMails(lUsers, us)))
+        if debug:
+            print()
 
     # Read existing MLs and determine needed changes
     mLists = collectMMLists()
-    for ml in mLists:
-        print(ml)
+    if debug:
+        for ml in mLists:
+            print(ml)
 
     reconcile(lGroups, lUsers, mLists)
 
