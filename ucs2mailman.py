@@ -19,6 +19,9 @@ testMode2 = False
 filterList = ""
 admin = ""
 
+from public import public
+
+from contextlib import ExitStack
 from mailman.config import config
 from mailman.core.i18n import _
 from mailman.core.initialize import initialize
@@ -89,7 +92,7 @@ class ldapGroup:
         self.userList = []
         if users:
             for ln in users:
-                self.userList.append(ldapAttr(ln, "uid")[0] + "@" + str.join(".", ldapAttr(ln, "dc")))
+                self.userList.append((ldapAttr(ln, "uid")[0] + "@" + str.join(".", ldapAttr(ln, "dc"))).lower())
 
 
 class ldapUser:
@@ -293,19 +296,19 @@ def reconcile(lGroups, lUsers, mLists):
             mListDict[ml.mlName] = ml
         else:
             # (2) For existing lists:
-            ml = mListDict(lg.mailAddr)
+            ml = mListDict[lg.mailAddr]
             mml = getML(lg.mailAddr)
         for luser in lg.userList:
             user = findUser(lUsers, luser)
             #  (2a) Any subscribers (members) missing?
-            if luser not in ml.mlMembers:
+            if luser.lower() not in ml.mlMembers:
                 print("Subscriber %s to list %s missing" % (luser, lg.mailAddr))
                 if not testMode2:
                     mlSubscribe(mml, luser, user.dName)
             #  (2b) Any nonMembers (whitelisted posters) missing?
             for addtlMail in allMails(lUsers, luser):
                 if addtlMail not in ml.mlNonMembers:
-                    print("Whitelist entry %s (user %s) to list %s missing" % (addtlMail, luser, lg.mailAddr))
+                    print(" Whitelist entry %s (user %s) to list %s missing" % (addtlMail, luser, lg.mailAddr))
                     if not testMode2:
                         mlAddSubscription(mml, luser, addtlMail)
         #  (2c) Any extra subscribers (members) that should be removed?
@@ -389,8 +392,13 @@ def main(argv):
 
     reconcile(lGroups, lUsers, mLists)
 
-    return 0
+    with ExitStack() as resources:
+        # If given a bogus subcommand, the database won't have been
+        # initialized so there's no transaction to commit.
+        if config.db is not None:
+            resources.enter_context(transaction())
 
+    return 0
 
 
 if __name__ == "__main__":
