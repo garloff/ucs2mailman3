@@ -280,6 +280,25 @@ def mlAddSubscription(ml, mainAddr, addtlAddr):
     # Set moderation_action from new nonmember to default_member_action
     newmember.moderation_action = ml.default_member_action
 
+def mlRemoveSubscription(ml, user):
+    "remove user with mailaddress user from ML -- remove all addresses"
+    global userManager
+    if not userManager:
+        userManager = getUtility(IUserManager)
+    mainUser = userManager.get_user(user)
+    member = ml.members.get_member(user)
+    assert(member)
+    ml.unsubscription_policy = SubscriptionPolicy.open
+    member.unsubscribe()
+    for addr in mainUser.addresses:
+        #if addr == mainUser.preferred_address:
+        #    continue
+        member = ml.nonmembers.get_member(addr)
+        if member:
+            member.unsubscribe()
+    ml.unsubscription_policy = SubscriptionPolicy.confirm
+
+
 def reconcile(lGroups, lUsers, mLists):
     "Reconcile Mailman3 lists with input from LDAP"
     # Now: Reconciliation steps
@@ -320,7 +339,9 @@ def reconcile(lGroups, lUsers, mLists):
         for member in ml.mlMembers:
             if member not in lg.userList:
                 print("Subscriber %s should be removed from list %s" % (member, lg.mailAddr))
-                # TODO
+                if not testMode2:
+                    mml = getML(lg.mailAddr)
+                    mlRemoveSubscription(mml, member)
         # Note: Extra nonMembers are OK
     # Note: Extra lists are OK
     pass
