@@ -196,7 +196,6 @@ domManager = None
 def collectMMLists():
     "Get all mailings lists from Mailman3"
     global domManager
-    initialize()
     domManager = getUtility(IDomainManager)
     lists = []
     for domain in domManager:
@@ -223,9 +222,6 @@ userManager = None
 
 def createML(lGroup):
     "Create mailing list with default settings from ldapGroup lGroup"
-    global userManager
-    if not userManager:
-        userManager = getUtility(IUserManager)
     assert(admin)
     #domName = lGroup.mailAddr[lGroup.mailAddr.find("@")+1:]
     #domain = domManager[domName]
@@ -248,37 +244,72 @@ def createML(lGroup):
     mList.description = "LDAP group %s" % lGroup.cn
     return mList
 
-def mlSubscribe(ml, mAddr, dName):
-    "Subscribe mAddr to ml as member and consider confirmed"
-    global userManager
-    if not userManager:
-        userManager = getUtility(IUserManager)
-    user = userManager.get_user(mAddr)
-    if not user:
-        user = userManager.make_user(mAddr, dName)
-    preferred = list(user.addresses)[0]
-    preferred.verified_on = now()
-    user.preferred_address = preferred
-    ml.subscription_policy = SubscriptionPolicy.open
-    ml.subscribe(user, MemberRole.member)
-    ml.subscription_policy = SubscriptionPolicy.moderate
+def findMMUser(luser, lUsers):
+    "Search MM for user with one of luser's mail addresses"
+    assert(userManager)
+    user = userManager.get_user(luser)
+    if user:
+        return user
+    for mAdr in allMails(lUsers, luser):
+        user = userManager.get_user(mAdr)
+        if user:
+            return user
+    return None    
 
-def mlAddSubscription(ml, mainAddr, addtlAddr):
-    "Add addtlAddr to mainAddr user and add to ml as nonmember"
-    global userManager
-    if not userManager:
-        userManager = getUtility(IUserManager)
-    mainUser = userManager.get_user(mainAddr)
-    newAddr = userManager.get_address(addtlAddr)
-    if not newAddr:
-        newAddr = userManager.create_address(addtlAddr)
-        newAddr.verified_on = now()
-        mainUser.link(newAddr)
-    ml.subscription_policy = SubscriptionPolicy.open
-    newmember = ml.subscribe(newAddr, MemberRole.nonmember)
-    ml.subscription_policy = SubscriptionPolicy.moderate
-    # Set moderation_action from new nonmember to default_member_action
-    newmember.moderation_action = ml.default_member_action
+def completeMMUser(mmUser, luser, lUsers, dName):
+    "Add all mails to mmUser"
+    pref = None
+    if not mmUser.controls(luser.lower()):
+        print(" Add primary %s <%s> to User %s" % (dName, luser, mmUser))
+        if not testMode2:
+            newAddr = mmUser.register(luser, dName)
+            newAddr.verified_on = now()
+            if not mmUser.preferred_address:
+                mmUser.preferred_address = newAddr
+    for addr in allMails(lUsers, luser):
+        if not mmUser.controls(addr.lower()):
+            print(" Add 2ndary %s <%s> to User %s" % (dName, addr, mmUser))
+            if not testMode2:
+                newAddr = mmUser.register(addr, dName)
+                newAddr.verified_on = now()
+    if not mmUser.preferred_address:
+        luserAddr = list(filter(lambda x: x.email == luser, mmUser.addresses))[0]
+        if not testMode2:
+            mmUser.preferred_address = luserAddr
+
+def completeSubscription(mmUser, mmList):
+    """Add all missing mails from mmUser to mmList subscriptions;
+       if there is no member subscription, make sure we create one,
+       preferrably the preferred address. We might need to remove it
+       from nonmembers before."""
+    memberSubscribed = None
+    for mmAddr in mmUser.addresses:
+        if mmList.members.get_member(mmAddr.email):
+            memberSubscribed = mmAddr
+            break
+    # We lack a member subscription. Do it!
+    mmList.subscription_policy = SubscriptionPolicy.open
+    if not memberSubscribed:
+        # May need to first unsubscribe preferred address as nonmember
+        prefMem = mmList.nonmembers.get_member(mmUser.preferred_address.email)
+        if prefMem:
+            print(" Remove %s as non-member from %s" % (mmUser.preferred_address.email, mmList))
+            mmList.unsubscription_policy = SubscriptionPolicy.open
+            if not testMode2:
+                prefMem.unsubscribe()
+            mmList.unsubscription_policy = SubscriptionPolicy.confirm
+        print(" Add %s as member to %s" % (mmUser.preferred_address.email, mmList))
+        if not testMode2:
+            memberSubscribed = mmList.subscribe(mmUser.preferred_address, MemberRole.member)
+    # Now we have a member, add all other addresses as non-members
+    for mmAddr in mmUser.addresses:
+        if not mmList.members.get_member(mmAddr.email) and not mmList.nonmembers.get_member(mmAddr.email):
+            print(" Add %s as non-member to %s" % (mmAddr.email, mmList))
+            if not testMode2:
+                mmSubscr = mmList.subscribe(mmAddr, MemberRole.nonmember)
+                mmSubscr.moderation_action = mmList.default_member_action
+    mmList.subscription_policy = SubscriptionPolicy.moderate
+
 
 def reconcile(lGroups, lUsers, mLists):
     "Reconcile Mailman3 lists with input from LDAP"
@@ -305,20 +336,36 @@ def reconcile(lGroups, lUsers, mLists):
             mml = getML(lg.mailAddr)
         for luser in lg.userList:
             user = findUser(lUsers, luser)
-            #  (2a) Any subscribers (members) missing?
-            if luser.lower() not in ml.mlMembers:
-                print("Subscriber %s <%s> to list %s missing" % (user.dName, luser, lg.mailAddr))
+            #  (2a) Ensure that user identified by luser is properly subscribed
+            #  - subscribed as member with at least one address (preferrably the primary)
+            #  - subscribed as nonmember with all other addresses
+            # Case (2a1): None of the mail addresses of this user is known to mailman3:
+            #  -> Create a new MM user with main address 
+            mmUser = findMMUser(luser, lUsers)
+            if not mmUser:
+                print(" Create User %s <%s>" % (user.dName, luser))
                 if not testMode2:
-                    mlSubscribe(mml, luser, user.dName)
-            #  (2b) Any nonMembers (whitelisted posters) missing?
-            for addtlMail in allMails(lUsers, luser):
-                if addtlMail not in ml.mlNonMembers:
-                    print(" Whitelist entry %s (user %s) to list %s missing" % (addtlMail, luser, lg.mailAddr))
-                    if not testMode2:
-                        mlAddSubscription(mml, luser, addtlMail)
+                    mmUser = userManager.make_user(luser, user.dName)
+                    pref = list(mmUser.addresses)[0]
+                    pref.verified_on = now()
+                    mmUser.preferred_address = pref
+            # Case (2a2): Some mail addresses are known to MM
+            #  -> Add missing addresses to user (if any)
+            completeMMUser(mmUser, luser, lUsers, user.dName)
+            #  -> Check subscription and add missing ones (if any)
+            completeSubscription(mmUser, mml)
         #  (2c) Any extra subscribers (members) that should be removed?
+        extra = []
         for member in ml.mlMembers:
-            if member not in lg.userList:
+            found = False
+            for lgUser in lg.userList:
+                if member == lgUser:
+                    found = True
+                    break
+                if member in allMails(lUsers, lgUser):
+                    found = True
+                    break
+            if not found:
                 print("Subscriber %s should be removed from list %s" % (member, lg.mailAddr))
                 # TODO
         # Note: Extra nonMembers are OK
@@ -347,6 +394,7 @@ def usage(ret):
 
 def main(argv):
     global debug, testMode, testMode2, admin, filterList, prefix
+    global userManager
     translate = None
     # TODO: Use getopt
     try:
@@ -396,7 +444,10 @@ def main(argv):
     # Switch to mailman user ID
     os.setegid(pwd.getpwnam('list').pw_gid)
     os.seteuid(pwd.getpwnam('list').pw_uid)
+
     # Read existing MLs and determine needed changes
+    initialize()
+    userManager = getUtility(IUserManager)
     mLists = collectMMLists()
     if debug:
         for ml in mLists:
