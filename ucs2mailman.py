@@ -244,32 +244,6 @@ def createML(lGroup):
     mList.description = "LDAP group %s" % lGroup.cn
     return mList
 
-def mlSubscribe(ml, mAddr, dName):
-    "Subscribe mAddr to ml as member and consider confirmed"
-    user = userManager.get_user(mAddr)
-    if not user:
-        user = userManager.make_user(mAddr, dName)
-    preferred = list(user.addresses)[0]
-    preferred.verified_on = now()
-    user.preferred_address = preferred
-    ml.subscription_policy = SubscriptionPolicy.open
-    ml.subscribe(user, MemberRole.member)
-    ml.subscription_policy = SubscriptionPolicy.moderate
-
-def mlAddSubscription(ml, mainAddr, addtlAddr):
-    "Add addtlAddr to mainAddr user and add to ml as nonmember"
-    mainUser = userManager.get_user(mainAddr)
-    newAddr = userManager.get_address(addtlAddr)
-    if not newAddr:
-        newAddr = userManager.create_address(addtlAddr)
-        newAddr.verified_on = now()
-        mainUser.link(newAddr)
-    ml.subscription_policy = SubscriptionPolicy.open
-    newmember = ml.subscribe(newAddr, MemberRole.nonmember)
-    ml.subscription_policy = SubscriptionPolicy.moderate
-    # Set moderation_action from new nonmember to default_member_action
-    newmember.moderation_action = ml.default_member_action
-
 def findMMUser(luser, lUsers):
     "Search MM for user with one of luser's mail addresses"
     assert(userManager)
