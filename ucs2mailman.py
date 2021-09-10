@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: AGPL-3
 #
 
-import os, sys, subprocess, re, getopt
+import os, sys, subprocess, re, getopt, pwd
 from operator import methodcaller, attrgetter
 import bisect
 
@@ -393,6 +393,9 @@ def main(argv):
         if debug:
             print()
 
+    # Switch to mailman user ID
+    os.setegid(pwd.getpwnam('list').pw_gid)
+    os.seteuid(pwd.getpwnam('list').pw_uid)
     # Read existing MLs and determine needed changes
     mLists = collectMMLists()
     if debug:
