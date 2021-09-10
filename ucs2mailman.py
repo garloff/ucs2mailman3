@@ -271,8 +271,10 @@ def mlAddSubscription(ml, mainAddr, addtlAddr):
         newAddr.verified_on = now()
         mainUser.link(newAddr)
     ml.subscription_policy = SubscriptionPolicy.open
-    ml.subscribe(newAddr, MemberRole.nonmember)
+    newmember = ml.subscribe(newAddr, MemberRole.nonmember)
     ml.subscription_policy = SubscriptionPolicy.moderate
+    # Set moderation_action from new nonmember to default_member_action
+    newmember.moderation_action = ml.default_member_action
 
 def reconcile(lGroups, lUsers, mLists):
     "Reconcile Mailman3 lists with input from LDAP"
