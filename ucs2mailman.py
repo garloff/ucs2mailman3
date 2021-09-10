@@ -18,6 +18,7 @@ testMode = False
 testMode2 = False
 filterList = ""
 admin = ""
+prefix = ""
 
 from public import public
 
@@ -86,7 +87,7 @@ class ldapGroup:
             print("ERROR: No cn= in %s" % lines[0])
         mailAddr = ldapParse(lines, "mailAddress")
         if mailAddr and mailAddr[0] != "None":
-            self.mailAddr = mailAddr[0]
+            self.mailAddr = prefix+mailAddr[0]
         users = ldapParse(lines, "users")
         self.userList = []
         if users:
@@ -122,7 +123,10 @@ class mList:
         self.mlNonMembers = []
         members = ml.get_roster(MemberRole.member).members
         for member in members:
-            self.mlMembers.append(member.address.email)
+            if member.address:
+                self.mlMembers.append(member.address.email)
+            else:
+                print(" member %s without address?" % member, file = sys.stderr)
         members = ml.get_roster(MemberRole.nonmember).members
         for member in members:
             self.mlNonMembers.append(member.address.email)
@@ -322,7 +326,7 @@ def reconcile(lGroups, lUsers, mLists):
     pass
 
 def usage(ret):
-    print("Usage: ucs2mailman.py [-d] [-n] [-h] [-a adminMail] [-t DOMAIN] [-f LIST]")
+    print("Usage: ucs2mailman.py [-d] [-n] [-h] [-a adminMail] [-t DOMAIN] [-p PREFIX] [-f LIST]")
     print("(c) Kurt Garloff <garloff@osb-alliance.com>, 9/2021, AGPL-v3")
     print("ucs2mailman.py calls udm to get lists of groups and users from UCS LDAP.")
     print("It then gets the mailing list with subscribers and nonMembers from Mailman3.")
@@ -337,15 +341,16 @@ def usage(ret):
     print(" -h           => output this help an exit")
     print(" -a adminMail => use this user as owner/moderator for newly created lists (must exist!)")
     print(" -t DOMAIN    => replace mailAddress domain with DOMAIN for the ML")
-    print(" -f LIST      => only process mailing list LIST")
+    print(" -p PREFIX    => prepend prefix to mailing list names")
+    print(" -f LIST      => only process mailing list LIST (matching happens after applying -p/-t)")
     sys.exit(ret)
 
 def main(argv):
-    global debug, testMode, testMode2, admin, filterList
+    global debug, testMode, testMode2, admin, filterList, prefix
     translate = None
     # TODO: Use getopt
     try:
-        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNa:t:f:')
+        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNa:t:f:p:')
     except getopt.GetoptError as exc:
         print(exc)
         usage(1)
@@ -367,6 +372,9 @@ def main(argv):
             continue
         if opt == "-t":
             translate = arg
+            continue
+        if opt == "-p":
+            prefix = arg
             continue
         if opt == "-f":
             filterList = arg
