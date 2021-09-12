@@ -19,6 +19,8 @@ testMode2 = False
 filterList = ""
 admin = ""
 prefix = ""
+userFile = ""
+groupFile = ""
 
 from public import public
 
@@ -74,28 +76,8 @@ def ldapAttr(ln, attr):
         ix = ln.find(srch)
     return ans
 
-
-class ldapGroup:
-    "Representation of LDAP group"
-    def __init__(self, lines):
-        self.cn = None
-        self.mailAddr = None
-        cn = ldapAttr(lines[0], "cn")
-        if cn:
-            self.cn = cn[0]
-        else:
-            print("ERROR: No cn= in %s" % lines[0])
-        mailAddr = ldapParse(lines, "mailAddress")
-        if mailAddr and mailAddr[0] != "None":
-            self.mailAddr = prefix+mailAddr[0]
-        users = ldapParse(lines, "users")
-        self.userList = []
-        if users:
-            for ln in users:
-                self.userList.append((ldapAttr(ln, "uid")[0] + "@" + str.join(".", ldapAttr(ln, "dc"))).lower())
-
-
 class ldapUser:
+    "Represents interesting fields from LDAP user list"
     def __init__(self, lines):
         self.uid = ldapAttr(lines[0], "uid")[0]
         self.primMail = self.uid + "@" + str.join(".", ldapAttr(lines[0], "dc"))
@@ -115,8 +97,42 @@ class ldapUser:
     def sortKey(self):
         return self.primMail.lower()
 
+def findUser(lUsers, primMail):
+    "Find user in sorted userList by primMail"
+    #sList = map(lambda x: x.sortKey(), userList)
+    primMail = primMail.lower()
+    sList = [u.sortKey() for u in lUsers]
+    ix = bisect.bisect_left(sList, primMail)
+    if ix == len(sList) or sList[ix] != primMail:
+        return None
+    return lUsers[ix]
+
+
+class ldapGroup:
+    "Representation of LDAP group"
+    def __init__(self, lines, lUsers):
+        self.cn = None
+        self.mailAddr = None
+        cn = ldapAttr(lines[0], "cn")
+        if cn:
+            self.cn = cn[0]
+        else:
+            print("ERROR: No cn= in %s" % lines[0])
+        mailAddr = ldapParse(lines, "mailAddress")
+        if mailAddr and mailAddr[0] != "None":
+            self.mailAddr = prefix+mailAddr[0]
+        users = ldapParse(lines, "users")
+        self.userList = []
+        if users:
+            for ln in users:
+                userMail = (ldapAttr(ln, "uid")[0] + "@" + str.join(".", ldapAttr(ln, "dc"))).lower()
+                userObj = findUser(lUsers, userMail)
+                assert(userObj)
+                self.userList.append(userObj)
+
 
 class mList:
+    "Mailman mailing list members"
     def __init__(self, ml):
         self.mlName = ml.posting_address
         self.mlMembers = []
@@ -141,33 +157,16 @@ def replDomain(email, newdom):
     return email[:domix+1] + newdom
 
 
-def collectGroups(translate):
-    f = subprocess.Popen(("%s" % udmBin,"groups/group", "list"), text = True, stdout = subprocess.PIPE)
-    lines = list(map(lambda x: x.rstrip('\n'), f.stdout.readlines()))
-    if f.wait():
-        assert(false)
-    groups = []
-    last = 0
-    for lno in range(0, len(lines)):
-        if not lines[lno]:
-            if lno == last:
-                last += 1
-            else:
-                groups.append(ldapGroup(lines[last:lno]))
-                last = lno+1
-    if len(lines) and last != len(lines):
-        groups.append(ldapGroup(lines[last:]))
-    groups = list(filter(lambda x: x.mailAddr is not None, groups))
-    if translate:
-        for g in groups:
-            g.mailAddr = replDomain(g.mailAddr, translate)
-    return groups
-
 def collectUsers():
-    f = subprocess.Popen(("%s" % udmBin,"users/user", "list"), text = True, stdout = subprocess.PIPE)
-    lines = list(map(lambda x: x.rstrip('\n'), f.stdout.readlines()))
-    if f.wait():
-        assert(false)
+    "Read user list from LDAP"
+    if userFile:
+        f = open(userFile, "r")
+        lines = list(map(lambda x: x.rstrip('\n'), f.readlines()))
+    else:
+        f = subprocess.Popen(("%s" % udmBin,"users/user", "list"), text = True, stdout = subprocess.PIPE)
+        lines = list(map(lambda x: x.rstrip('\n'), f.stdout.readlines()))
+        if f.wait():
+            assert(false)
     users = []
     last = 0
     for lno in range(0, len(lines)):
@@ -181,17 +180,37 @@ def collectUsers():
         users.append(ldapUser(lines[last:]))
     return sorted(users, key = ldapUser.sortKey)
 
-def findUser(userList, primMail):
-    #sList = map(lambda x: x.sortKey(), userList)
-    primMail = primMail.lower()
-    sList = [u.sortKey() for u in userList]
-    ix = bisect.bisect_left(sList, primMail)
-    if ix == len(sList) or sList[ix] != primMail:
-        return None
-    return userList[ix]
+
+def collectGroups(lUsers, translate = None):
+    "Read group list from LDAP"
+    if groupFile:
+        f = open(groupFile, "r")
+        lines = list(map(lambda x: x.rstrip('\n'), f.readlines()))
+    else:
+        f = subprocess.Popen(("%s" % udmBin,"groups/group", "list"), text = True, stdout = subprocess.PIPE)
+        lines = list(map(lambda x: x.rstrip('\n'), f.stdout.readlines()))
+        if f.wait():
+            assert(false)
+    groups = []
+    last = 0
+    for lno in range(0, len(lines)):
+        if not lines[lno]:
+            if lno == last:
+                last += 1
+            else:
+                groups.append(ldapGroup(lines[last:lno], lUsers))
+                last = lno+1
+    if len(lines) and last != len(lines):
+        groups.append(ldapGroup(lines[last:]))
+    groups = list(filter(lambda x: x.mailAddr is not None, groups))
+    if translate:
+        for g in groups:
+            g.mailAddr = replDomain(g.mailAddr, translate)
+    return groups
 
 # global MM context
 domManager = None
+userManager = None
 
 def collectMMLists():
     "Get all mailings lists from Mailman3"
@@ -204,21 +223,12 @@ def collectMMLists():
     return lists
 
 def getML(adr):
+    "Get mailinglist object with address adr from Mailman3"
     for domain in domManager:
         for ml in domain.mailing_lists:
             if ml.posting_address == adr:
                 return ml
     return None
-
-def allMails(lUsers, userMail):
-    "return list of extra mails from user"
-    user = findUser(lUsers, userMail)
-    if user:
-        return user.mails
-    else:
-        return []
-
-userManager = None
 
 def createML(lGroup):
     "Create mailing list with default settings from ldapGroup lGroup"
@@ -244,38 +254,38 @@ def createML(lGroup):
     mList.description = "LDAP group %s" % lGroup.cn
     return mList
 
-def findMMUser(luser, lUsers):
-    "Search MM for user with one of luser's mail addresses"
+def findMMUser(lUser):
+    "Search MM for user with one of lUser's mail addresses"
     assert(userManager)
-    user = userManager.get_user(luser)
+    user = userManager.get_user(lUser.primMail)
     if user:
         return user
-    for mAdr in allMails(lUsers, luser):
+    for mAdr in lUser.mails:
         user = userManager.get_user(mAdr)
         if user:
             return user
-    return None    
+    return None
 
-def completeMMUser(mmUser, luser, lUsers, dName):
+def completeMMUser(mmUser, lUser, dName):
     "Add all mails to mmUser"
     pref = None
-    if not mmUser.controls(luser.lower()):
-        print(" Add primary %s <%s> to User %s" % (dName, luser, mmUser))
+    if not mmUser.controls(lUser.primMail.lower()):
+        print(" Add primary %s <%s> to User %s" % (dName, lUser.primMail, mmUser))
         if not testMode2:
             newAddr = mmUser.register(luser, dName)
             newAddr.verified_on = now()
             if not mmUser.preferred_address:
                 mmUser.preferred_address = newAddr
-    for addr in allMails(lUsers, luser):
+    for addr in lUser.mails:
         if not mmUser.controls(addr.lower()):
             print(" Add 2ndary %s <%s> to User %s" % (dName, addr, mmUser))
             if not testMode2:
                 newAddr = mmUser.register(addr, dName)
                 newAddr.verified_on = now()
     if not mmUser.preferred_address:
-        luserAddr = list(filter(lambda x: x.email == luser, mmUser.addresses))[0]
+        lUserAddr = list(filter(lambda x: x.email == lUser.primMail.lower(), mmUser.addresses))[0]
         if not testMode2:
-            mmUser.preferred_address = luserAddr
+            mmUser.preferred_address = lUserAddr
 
 def completeSubscription(mmUser, mmList):
     """Add all missing mails from mmUser to mmList subscriptions;
@@ -311,7 +321,7 @@ def completeSubscription(mmUser, mmList):
     mmList.subscription_policy = SubscriptionPolicy.moderate
 
 
-def reconcile(lGroups, lUsers, mLists):
+def reconcile(lGroups, mLists):
     "Reconcile Mailman3 lists with input from LDAP"
     # Now: Reconciliation steps
     mListDict = { x.mlName: x for x in mLists }
@@ -334,24 +344,23 @@ def reconcile(lGroups, lUsers, mLists):
             # (2) For existing lists:
             ml = mListDict[lg.mailAddr]
             mml = getML(lg.mailAddr)
-        for luser in lg.userList:
-            user = findUser(lUsers, luser)
+        for lUser in lg.userList:
             #  (2a) Ensure that user identified by luser is properly subscribed
             #  - subscribed as member with at least one address (preferrably the primary)
             #  - subscribed as nonmember with all other addresses
             # Case (2a1): None of the mail addresses of this user is known to mailman3:
             #  -> Create a new MM user with main address 
-            mmUser = findMMUser(luser, lUsers)
+            mmUser = findMMUser(lUser)
             if not mmUser:
-                print(" Create User %s <%s>" % (user.dName, luser))
+                print(" Create User %s <%s>" % (lUser.dName, lUser.primMail))
                 if not testMode2:
-                    mmUser = userManager.make_user(luser, user.dName)
+                    mmUser = userManager.make_user(lUser.primMail, lUser.dName)
                     pref = list(mmUser.addresses)[0]
                     pref.verified_on = now()
                     mmUser.preferred_address = pref
             # Case (2a2): Some mail addresses are known to MM
             #  -> Add missing addresses to user (if any)
-            completeMMUser(mmUser, luser, lUsers, user.dName)
+            completeMMUser(mmUser, lUser, lUser.dName)
             #  -> Check subscription and add missing ones (if any)
             completeSubscription(mmUser, mml)
         #  (2c) Any extra subscribers (members) that should be removed?
@@ -359,21 +368,28 @@ def reconcile(lGroups, lUsers, mLists):
         for member in ml.mlMembers:
             found = False
             for lgUser in lg.userList:
-                if member == lgUser:
+                if member == lgUser.primMail.lower():
                     found = True
                     break
-                if member in allMails(lUsers, lgUser):
+                if member in map(lambda x: x.lower(), lgUser.mails):
                     found = True
                     break
             if not found:
                 print("Subscriber %s should be removed from list %s" % (member, lg.mailAddr))
                 # TODO
+                # Case (2c1) We find other MM mail addresses from that user in the group
+                # In this case: Ensure that the preferred_address is one from LDAP
+                # and make sure this one it subscribed as member.
+                # Case (2c2) User should be unsubscribed. In this case, try to find other
+                # mails from MM and remove the nonmembers as well. (This may be incomplete
+                # and that's fine.)
         # Note: Extra nonMembers are OK
     # Note: Extra lists are OK
     pass
 
 def usage(ret):
     print("Usage: ucs2mailman.py [-d] [-n] [-h] [-a adminMail] [-t DOMAIN] [-p PREFIX] [-f LIST]")
+    print("                      [-u FILE] [-g FILE]")
     print("(c) Kurt Garloff <garloff@osb-alliance.com>, 9/2021, AGPL-v3")
     print("ucs2mailman.py calls udm to get lists of groups and users from UCS LDAP.")
     print("It then gets the mailing list with subscribers and nonMembers from Mailman3.")
@@ -390,15 +406,17 @@ def usage(ret):
     print(" -t DOMAIN    => replace mailAddress domain with DOMAIN for the ML")
     print(" -p PREFIX    => prepend prefix to mailing list names")
     print(" -f LIST      => only process mailing list LIST (matching happens after applying -p/-t)")
+    print(" -u FILE      => use user  list from file (ldif) instead of calling udm")
+    print(" -g FILE      => use group list from file (ldif) instead of calling udm")
     sys.exit(ret)
 
 def main(argv):
-    global debug, testMode, testMode2, admin, filterList, prefix
+    global debug, testMode, testMode2, admin, filterList, prefix, userFile, groupFile
     global userManager
     translate = None
     # TODO: Use getopt
     try:
-        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNa:t:f:p:')
+        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNa:t:f:p:u:g:')
     except getopt.GetoptError as exc:
         print(exc)
         usage(1)
@@ -427,17 +445,23 @@ def main(argv):
         if opt == "-f":
             filterList = arg
             continue
+        if opt == "-u":
+            userFile = arg
+            continue
+        if opt == "-g":
+            groupFile = arg
+            continue
 
-    lGroups = collectGroups(translate)
     lUsers = collectUsers()
+    lGroups = collectGroups(lUsers, translate)
     # Debugging: Dump info
     for lg in lGroups:
         assert(lg.mailAddr is not None)
         if debug:
             print("LDAP(%s): %s" % (lg.cn, lg.mailAddr))
-        for us in lg.userList:
+        for lu in lg.userList:
             if debug:
-                print(" %s: %s" % (us, allMails(lUsers, us)))
+                print(" %s: %s %s" % (lu.dName, lu.primMail, lu.mails))
         if debug:
             print()
 
@@ -453,7 +477,7 @@ def main(argv):
         for ml in mLists:
             print(ml)
 
-    reconcile(lGroups, lUsers, mLists)
+    reconcile(lGroups, mLists)
 
     with ExitStack() as resources:
         # If given a bogus subcommand, the database won't have been
