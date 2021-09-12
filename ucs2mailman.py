@@ -16,6 +16,7 @@ udmBin = "/usr/sbin/udm"
 debug = False
 testMode = False
 testMode2 = False
+noDelete = False
 filterList = ""
 admin = ""
 prefix = ""
@@ -366,20 +367,37 @@ def reconcile(lGroups, mLists):
         #  (2c) Any extra subscribers (members) that should be removed?
         extra = []
         for member in ml.mlMembers:
-            found = False
+            foundPrim = False
+            foundAny = None
+            unsubUser = userManager.get_user(member)
             for lgUser in lg.userList:
                 if member == lgUser.primMail.lower():
-                    found = True
+                    foundPrim = True
                     break
                 if member in map(lambda x: x.lower(), lgUser.mails):
-                    found = True
+                    foundPrim = True
                     break
-            if not found:
-                print("Subscriber %s should be removed from list %s" % (member, lg.mailAddr))
-                # TODO
+                if not unsubUser:
+                    continue
+                for ml in unsubUser.addresses:
+                    if ml.email == lgUser.primMail.lower():
+                        foundAny = ml.email
+                        continue
+                    if not foundAny and ml.email in map(lambda x: x.lower(), lgUser.mails):
+                        foundAny = ml.email
+
+            if not foundPrim:
+                if not foundAny:
+                    print("Subscriber %s should be removed from list %s" % (member, lg.mailAddr))
+                else:
+                    print("Subscriber %s needs to change to %s for list %s" % (member, foundAny, lg.mailAddr))
+                if noDelete or testMode2:
+                    continue 
                 # Case (2c1) We find other MM mail addresses from that user in the group
                 # In this case: Ensure that the preferred_address is one from LDAP
                 # and make sure this one it subscribed as member.
+                
+                
                 # Case (2c2) User should be unsubscribed. In this case, try to find other
                 # mails from MM and remove the nonmembers as well. (This may be incomplete
                 # and that's fine.)
@@ -401,6 +419,7 @@ def usage(ret):
     print("Note that you will typically need to run this as root (with sudo).")
     print("Options: -d   => debug output")
     print(" -n           => don't do any changes to MailMan, just print actions")
+    print(" -k           => keep subscribers, don't delete, just print actions")
     print(" -h           => output this help an exit")
     print(" -a adminMail => use this user as owner/moderator for newly created lists (must exist!)")
     print(" -t DOMAIN    => replace mailAddress domain with DOMAIN for the ML")
@@ -411,7 +430,7 @@ def usage(ret):
     sys.exit(ret)
 
 def main(argv):
-    global debug, testMode, testMode2, admin, filterList, prefix, userFile, groupFile
+    global debug, testMode, testMode2, noDelete, admin, filterList, prefix, userFile, groupFile
     global userManager
     translate = None
     # TODO: Use getopt
@@ -432,6 +451,9 @@ def main(argv):
             continue
         if opt == "-N":
             testMode2 = True
+            continue
+        if opt == "-k":
+            noDelete = True
             continue
         if opt == "-a":
             admin = arg
