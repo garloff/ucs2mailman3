@@ -377,6 +377,12 @@ def reconcile(lGroups, mLists):
             if not found:
                 print("Subscriber %s should be removed from list %s" % (member, lg.mailAddr))
                 # TODO
+                # Case (2c1) We find other MM mail addresses from that user in the group
+                # In this case: Ensure that the preferred_address is one from LDAP
+                # and make sure this one it subscribed as member.
+                # Case (2c2) User should be unsubscribed. In this case, try to find other
+                # mails from MM and remove the nonmembers as well. (This may be incomplete
+                # and that's fine.)
         # Note: Extra nonMembers are OK
     # Note: Extra lists are OK
     pass
