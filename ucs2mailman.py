@@ -444,12 +444,15 @@ def usage(ret):
     print("                      [-u FILE] [-g FILE]")
     print("(c) Kurt Garloff <garloff@osb-alliance.com>, 9/2021, AGPL-v3")
     print("ucs2mailman.py calls udm to get lists of groups and users from UCS LDAP.")
+    print("Alternatively it can also process ldapsearch output (ldapsearch -o \"ldif-wrap=255\"),")
+    print(" see options -u -g to read UDM/ldapsearch output from files.")
     print("It then gets the mailing list with subscribers and nonMembers from Mailman3.")
     print("It then ensures that all LDAP groups with mailAddress have a corresponding")
     print("MailMan3 mailing list (ML) and that all group members are subscribed to it")
     print("and all other known mail addresses from subscribers are added as non-members")
     print("to allow them to have unmoderated posting. Extra subscribers (not in LDAP group)")
-    print("will be removed, extra non-members are left alone. Extra lists are also left alone.")
+    print("will be removed (unless -k is given), extra non-members are left alone.")
+    print("Extra lists are also left alone.")
     print("Note that you will typically need to run this as root (with sudo).")
     print("Options: -d   => debug output")
     print(" -n           => don't do any changes to MailMan, just print actions")
@@ -461,15 +464,17 @@ def usage(ret):
     print(" -f LIST      => only process mailing list LIST (matching happens after applying -p/-t)")
     print(" -u FILE      => use user  list from file (ldif) instead of calling udm")
     print(" -g FILE      => use group list from file (ldif) instead of calling udm")
+    print(" -s user      => switch ID (uid and gid) to to user (name) for mm3 config, default list")
     sys.exit(ret)
 
 def main(argv):
     global debug, testMode, testMode2, noDelete, admin, filterList, prefix, userFile, groupFile
     global userManager
     translate = None
+    identity = "list"
     # TODO: Use getopt
     try:
-        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNa:t:f:p:u:g:')
+        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNa:t:f:p:u:g:s:')
     except getopt.GetoptError as exc:
         print(exc)
         usage(1)
@@ -507,6 +512,9 @@ def main(argv):
         if opt == "-g":
             groupFile = arg
             continue
+        if opt == "-s":
+            identity = arg
+            continue
 
     lUsers = collectUsers()
     lGroups = collectGroups(lUsers, translate)
@@ -521,9 +529,13 @@ def main(argv):
         if debug:
             print()
 
-    # Switch to mailman user ID
-    os.setegid(pwd.getpwnam('list').pw_gid)
-    os.seteuid(pwd.getpwnam('list').pw_uid)
+    if identity:
+        # Switch to mailman user ID
+        pwid = pwd.getpwnam(identity)
+        #print("Switching identity to %s: %i:%i" % (identity, pwid.pw_uid, pwid.pw_gid))
+        os.setegid(pwid.pw_gid)
+        euid = os.seteuid(pwid.pw_uid)
+        assert(euid == pwid.pw_uid)
 
     # Read existing MLs and determine needed changes
     initialize()
