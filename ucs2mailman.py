@@ -307,7 +307,7 @@ def completeMMUser(mmUser, lUser, dName):
     if not mmUser.controls(lUser.primMail.lower()):
         print(" Add primary %s <%s> to User %s" % (dName, lUser.primMail, mmUser))
         if not testMode2:
-            newAddr = mmUser.register(luser, dName)
+            newAddr = mmUser.register(lUser.primMail, dName)
             newAddr.verified_on = now()
             if not mmUser.preferred_address:
                 mmUser.preferred_address = newAddr
