@@ -355,6 +355,49 @@ def completeSubscription(mmUser, mmList):
                 mmSubscr.moderation_action = mmList.default_member_action
     mmList.subscription_policy = SubscriptionPolicy.moderate
 
+def changePrefMail(mUser, prefMail):
+    "mUser should change preferred mail to prefMail"
+    for mail in mUser.addresses:
+        if mail.email == prefMail:
+            #mail.verified_on = now()
+            mUser.preferred_address = mail
+
+def changeSubscr2Pref(mList, mUser, unMail):
+    "Ensure unMail is no longer member, ensure mUser.preferred_address is"
+    # Need to unsubscribe?
+    mlMember = mList.members.get_member(unMail)
+    if mlMember:
+        mList.unsubscription_policy = SubscriptionPolicy.open
+        mlMember.unsubscribe()
+        mList.unsubscription_policy = SubscriptionPolicy.confirm
+    # Already member?
+    mlMember = mList.members.get_member(mUser.preferred_address.email)
+    if mlMember:
+        return
+    # Non-member?
+    mlMember = mList.nonmembers.get_member(mUser.preferred_address.email)
+    if mlMember:
+        mList.unsubscription_policy = SubscriptionPolicy.open
+        mlMember.unsubscribe()
+        mList.unsubscription_policy = SubscriptionPolicy.confirm
+    # Subscribe as member
+    mList.subscription_policy = SubscriptionPolicy.open
+    mSubscr = mmList.subscribe(mUser, MemberRole.member)
+    #mSubscr.moderation_action = mList.default_member_action
+    mList.subscription_policy = SubscriptionPolicy.moderate
+
+def removeAll(mList, mUser):
+    mList.unsubscription_policy = SubscriptionPolicy.open
+    for mAdr in mUser.addresses:
+        mlMember = mList.members.get_member(mAdr.email)
+        if mlMember:
+            mlMember.unsubscribe()
+            continue
+        mlMember = mList.nonmembers.get_member(mAdr.email)
+        if mlMember:
+            mlMember.unsubscribe()
+    mList.unsubscription_policy = SubscriptionPolicy.confirm
+
 
 def reconcile(lGroups, mLists):
     "Reconcile Mailman3 lists with input from LDAP"
@@ -388,6 +431,7 @@ def reconcile(lGroups, mLists):
             mmUser = findMMUser(lUser)
             if not mmUser:
                 print(" Create User %s <%s>" % (lUser.dName, lUser.primMail))
+                ml.mlMembers.append(lUser.primMail)
                 if not testMode2:
                     mmUser = userManager.make_user(lUser.primMail, lUser.dName)
                     pref = list(mmUser.addresses)[0]
@@ -411,6 +455,7 @@ def reconcile(lGroups, mLists):
                 if member in map(lambda x: x.lower(), lgUser.mails):
                     foundPrim = True
                     break
+                assert(unsubUser)
                 if not unsubUser:
                     continue
                 for ml in unsubUser.addresses:
@@ -427,14 +472,17 @@ def reconcile(lGroups, mLists):
                     print("Subscriber %s needs to change to %s for list %s" % (member, foundAny, lg.mailAddr))
                 if noDelete or testMode2:
                     continue 
-                # Case (2c1) We find other MM mail addresses from that user in the group
-                # In this case: Ensure that the preferred_address is one from LDAP
-                # and make sure this one it subscribed as member.
-                
-                
-                # Case (2c2) User should be unsubscribed. In this case, try to find other
-                # mails from MM and remove the nonmembers as well. (This may be incomplete
-                # and that's fine.)
+                if foundAny:
+                    # Case (2c1) We find other MM mail addresses from that user in the group
+                    # In this case: Ensure that the preferred_address is one from LDAP
+                    # and make sure this one it subscribed as member.
+                    changePrefMail(unsubUser, foundAny)
+                    changeSubscr2Pref(mml, unsubUser, member)
+                else:
+                    # Case (2c2) User should be unsubscribed. In this case, try to find other
+                    # mails from MM and remove the nonmembers as well. (This may be incomplete
+                    # and that's fine.)
+                    removeAll(mml, unsubUser)
         # Note: Extra nonMembers are OK
     # Note: Extra lists are OK
     pass
@@ -534,8 +582,8 @@ def main(argv):
         pwid = pwd.getpwnam(identity)
         #print("Switching identity to %s: %i:%i" % (identity, pwid.pw_uid, pwid.pw_gid))
         os.setegid(pwid.pw_gid)
-        euid = os.seteuid(pwid.pw_uid)
-        assert(euid == pwid.pw_uid)
+        os.seteuid(pwid.pw_uid)
+        assert(os.geteuid() == pwid.pw_uid)
 
     # Read existing MLs and determine needed changes
     initialize()
