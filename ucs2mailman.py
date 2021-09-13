@@ -9,6 +9,7 @@
 import os, sys, subprocess, re, getopt, pwd
 from operator import methodcaller, attrgetter
 import bisect
+import base64
 
 #mailmanBin = "/usr/lib/mailman3/bin/mailman"
 udmBin = "/usr/sbin/udm"
@@ -48,12 +49,18 @@ from mailman.utilities.datetime import now
 def ldapParse(lns, attr):
     "Search lines in lns for LDAP attribute attr: and return array"
     ans = []
-    srch = " %s: " % attr
+    srch = "%s:" % attr
     for ln in lns:
-        if srch in ln:
-            ix = ln.find(':')
-            ans.append(ln[ix+2:])
-            #print("%s" % ln[ix+2:])
+        ix = ln.find(srch)
+        if ix == -1 or (ix > 0 and ln[ix-1] not in (" ", "\t")):
+            continue
+        ix += len(srch)
+        if ln[ix] == ":":
+            ans.append(base64.b64decode(ln[ix+2:]).decode("utf-8"))
+            # Base64 decode
+        else:
+            ans.append(ln[ix+1:])
+        #print("%s" % ln[ix+2:])
         if len(ln) == 0:
             break
     return ans
@@ -62,7 +69,8 @@ def ldapAttr(ln, attr):
     "Search line for attribute attr=[...], return array"
     ans = []
     srch = "%s=" % attr
-    assert(srch in ln)
+    if not srch in ln:
+        print("WARNING: Expected %s in %s" % (srch, ln))
     ix = ln.find(srch)
     while ix >= 0:
         ix += len(srch)
@@ -82,11 +90,21 @@ class ldapUser:
     def __init__(self, lines):
         self.uid = ldapAttr(lines[0], "uid")[0]
         self.primMail = self.uid + "@" + str.join(".", ldapAttr(lines[0], "dc"))
-        self.dName = ldapParse(lines, "displayName")[0]
+        #if debug:
+        #    print("Parsing %i lines for uid %s <%s>" % (len(lines), self.uid, self.primMail))
+        dName = ldapParse(lines, "displayName")
+        if dName:
+            self.dName = dName[0]
+        else:
+            print("WARN: uid %s <%s> without displayName!" % (self.uid, self.primMail))
+            self.dName = ""
         self.mails = []
         self.groups = []
-        self.mails.append(ldapParse(lines, "PasswordRecoveryEmail")[0])
+        self.mails.extend(ldapParse(lines, "PasswordRecoveryEmail"))
         for mail in ldapParse(lines, "e-mail"):
+            if not mail in self.mails:
+                self.mails.append(mail)
+        for mail in ldapParse(lines, "mail"):
             if not mail in self.mails:
                 self.mails.append(mail)
         mail = ldapParse(lines, "mailForwardAddress")
@@ -120,14 +138,22 @@ class ldapGroup:
         else:
             print("ERROR: No cn= in %s" % lines[0])
         mailAddr = ldapParse(lines, "mailAddress")
+        if not mailAddr:
+            mailAddr = ldapParse(lines, "mailPrimaryAddress")
         if mailAddr and mailAddr[0] != "None":
             self.mailAddr = prefix+mailAddr[0]
         users = ldapParse(lines, "users")
+        if not users:
+            users = ldapParse(lines, "uniqueMember")
         self.userList = []
         if users:
             for ln in users:
+                if ln.find("uid=") == -1:
+                    continue
                 userMail = (ldapAttr(ln, "uid")[0] + "@" + str.join(".", ldapAttr(ln, "dc"))).lower()
                 userObj = findUser(lUsers, userMail)
+                if not userObj:
+                    print("ERROR: User %s not found in UserList" % userMail)
                 assert(userObj)
                 self.userList.append(userObj)
 
@@ -162,7 +188,8 @@ def collectUsers():
     "Read user list from LDAP"
     if userFile:
         f = open(userFile, "r")
-        lines = list(map(lambda x: x.rstrip('\n'), f.readlines()))
+        lines = map(lambda x: x.rstrip('\n'), f.readlines())
+        lines = list(filter(lambda x: not x or x[0] != "#", lines))
     else:
         f = subprocess.Popen(("%s" % udmBin,"users/user", "list"), text = True, stdout = subprocess.PIPE)
         lines = list(map(lambda x: x.rstrip('\n'), f.stdout.readlines()))
@@ -175,9 +202,12 @@ def collectUsers():
             if lno == last:
                 last += 1
             else:
-                users.append(ldapUser(lines[last:lno]))
+                #if lines[last][:6] != "search":
+                if lines[last].find("uid=") != -1:
+                    users.append(ldapUser(lines[last:lno]))
                 last = lno+1
-    if len(lines) and last != len(lines):
+    #if len(lines) and last != len(lines) and lines[last][:6] != "search":
+    if len(lines) and last != len(lines) and lines[last].find("uid=") != -1:
         users.append(ldapUser(lines[last:]))
     return sorted(users, key = ldapUser.sortKey)
 
@@ -186,7 +216,8 @@ def collectGroups(lUsers, translate = None):
     "Read group list from LDAP"
     if groupFile:
         f = open(groupFile, "r")
-        lines = list(map(lambda x: x.rstrip('\n'), f.readlines()))
+        lines = map(lambda x: x.rstrip('\n'), f.readlines())
+        lines = list(filter(lambda x: not x or x[0] != "#", lines))
     else:
         f = subprocess.Popen(("%s" % udmBin,"groups/group", "list"), text = True, stdout = subprocess.PIPE)
         lines = list(map(lambda x: x.rstrip('\n'), f.stdout.readlines()))
@@ -199,9 +230,12 @@ def collectGroups(lUsers, translate = None):
             if lno == last:
                 last += 1
             else:
-                groups.append(ldapGroup(lines[last:lno], lUsers))
+                #if lines[last][:6] != "search":
+                if lines[last].find("cn=") != -1:
+                    groups.append(ldapGroup(lines[last:lno], lUsers))
                 last = lno+1
-    if len(lines) and last != len(lines):
+    #if len(lines) and last != len(lines) and lines[last][:6] != "search":
+    if len(lines) and last != len(lines) and lines[last].find("cn=") != -1:
         groups.append(ldapGroup(lines[last:]))
     groups = list(filter(lambda x: x.mailAddr is not None, groups))
     if translate:
