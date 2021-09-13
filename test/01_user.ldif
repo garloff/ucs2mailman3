@@ -13,7 +13,7 @@ DN: uid=first2.last2,ou=external-users,dc=test,dc=domain
 
 DN: uid=first3.last3,ou=external-users,dc=test,dc=domain
   PasswordRecoveryEmail: last3@test.private
-  displayName: Frist3 Last3
+  displayName: First3 Last3
   e-mail: last3@test.domain
   groups: cn=test-team2
 
