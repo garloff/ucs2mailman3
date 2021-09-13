@@ -1,0 +1,15 @@
+DN: cn=test-team1,cn=groups,dc=test,dc=domain
+  description: Test team1
+  mailAddress: test-team1@test.domain
+  name: test-team1
+  users: uid=first1.last1,ou=external-users,dc=test,dc=domain
+  users: uid=last2,ou=external-users,dc=test,dc=domain
+
+DN: cn=test-team2,cn=groups,dc=test,dc=domain
+  description: Test team2
+  mailAddress: test-team2@test.domain
+  name: test-team2
+  users: uid=first1.last1,ou=external-users,dc=test,dc=domain
+  users: uid=first4.last4,ou=external-users,dc=test,dc=domain
+
+
