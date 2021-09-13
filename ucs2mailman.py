@@ -382,7 +382,7 @@ def changeSubscr2Pref(mList, mUser, unMail):
         mList.unsubscription_policy = SubscriptionPolicy.confirm
     # Subscribe as member
     mList.subscription_policy = SubscriptionPolicy.open
-    mSubscr = mmList.subscribe(mUser, MemberRole.member)
+    mSubscr = mList.subscribe(mUser, MemberRole.member)
     #mSubscr.moderation_action = mList.default_member_action
     mList.subscription_policy = SubscriptionPolicy.moderate
 
