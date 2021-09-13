@@ -38,18 +38,26 @@ test_memberships()
 LISTS=$(mailman lists | grep test.domain)
 echo "Test clean state"
 test -z "$LISTS" || exiterr 1 "test domain lists already existing"
+
 echo "01: Create lists"
 ./ucs2mailman.py -a scs@garloff.de -u test/01_user.ldif -g test/01_group.ldif || exiterr 2 "ucs2mailman returning non-0"
 test_lists 3
 test_memberships 4 5 01
+
 echo "01: Rerun create lists"
 ./ucs2mailman.py -a scs@garloff.de -u test/01_user.ldif -g test/01_group.ldif || exiterr 6 "ucs2mailman returning non-0"
 test_lists 7
 test_memberships 8 9 01
+
 echo "02: New subscribers"
 ./ucs2mailman.py -a scs@garloff.de -u test/02_user.ldif -g test/02_group.ldif || exiterr 10 "ucs2mailman returning non-0"
 test_lists 11
 test_memberships 12 13 02
+
+echo "03: Remove subscribers"
+./ucs2mailman.py -a scs@garloff.de -u test/03_user.ldif -g test/03_group.ldif || exiterr 14 "ucs2mailman returning non-0"
+test_lists 15
+test_memberships 16 17 03
 
 
 
