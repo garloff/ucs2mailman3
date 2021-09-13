@@ -1,0 +1,19 @@
+DN: uid=first1.last1,ou=external-users,dc=test,dc=domain
+  PasswordRecoveryEmail: last1@test.private
+  displayName: First1 Last1
+  e-mail: last1@test.domain
+  groups: cn=test-team1
+  groups: cn=test-team2
+
+DN: uid=first2.last2,ou=external-users,dc=test,dc=domain
+  PasswordRecoveryEmail: last2@test.private
+  displayName: First2 Last2
+  e-mail: last2@test.domain
+  groups: cn=test-team1
+
+DN: uid=first3.last3,ou=external-users,dc=test,dc=domain
+  PasswordRecoveryEmail: last3@test.private
+  displayName: Frist3 Last3
+  e-mail: last3@test.domain
+  groups: cn=test-team2
+
