@@ -32,16 +32,16 @@ from mailman.core.i18n import _
 from mailman.core.initialize import initialize
 from mailman.database.transaction import transaction
 
-from mailman.interfaces.domain import IDomainManager
-#from mailman.interfaces.domain import IMailingList
-from mailman.interfaces.subscriptions import ISubscriptionManager
+from zope.component import getUtility
 from mailman.interfaces.usermanager import IUserManager
 from mailman.interfaces.listmanager import IListManager
+from mailman.interfaces.subscriptions import ISubscriptionManager
 from mailman.interfaces.mailinglist import SubscriptionPolicy
+from mailman.interfaces.domain import IDomainManager
+#from mailman.interfaces.domain import IMailingList
 from mailman.interfaces.styles import IStyleManager
 from mailman.interfaces.member import MemberRole
 from mailman.app.lifecycle import create_list
-from zope.component import getUtility
 from mailman.testing.helpers import subscribe
 
 from mailman.utilities.datetime import now
