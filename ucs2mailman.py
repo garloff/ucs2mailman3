@@ -315,8 +315,11 @@ def completeMMUser(mmUser, lUser, dName):
         if not mmUser.controls(addr.lower()):
             print(" Add 2ndary %s <%s> to User %s" % (dName, addr, mmUser))
             if not testMode2:
-                newAddr = mmUser.register(addr, dName)
-                newAddr.verified_on = now()
+                try:
+                    newAddr = mmUser.register(addr, dName)
+                    newAddr.verified_on = now()
+                except BaseException as exc:
+                    print("ERROR: %s %s" % (type(exc), exc), file = sys.stderr)
     if not mmUser.preferred_address:
         lUserAddr = list(filter(lambda x: x.email == lUser.primMail.lower(), mmUser.addresses))[0]
         if not testMode2:
