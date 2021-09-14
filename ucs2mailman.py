@@ -3,7 +3,7 @@
 # Feed mailman3 MLs with group members from UCS LDAP
 #
 # (c) garloff@osb-alliance.com, 9/2021
-# SPDX-License-Identifier: AGPL-3
+# SPDX-License-Identifier: AGPL-3.0-or-later
 #
 
 import os, sys, subprocess, re, getopt, pwd
