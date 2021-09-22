@@ -18,7 +18,9 @@ debug = False
 testMode = False
 testMode2 = False
 noDelete = False
-filterList = ""
+filterList = []
+excludeList = []
+replaceList = []
 admin = ""
 prefix = ""
 userFile = ""
@@ -98,18 +100,14 @@ class ldapUser:
         else:
             print("WARN: uid %s <%s> without displayName!" % (self.uid, self.primMail))
             self.dName = ""
+        # Collect mail addresses
         self.mails = []
+        for tag in ("PasswordRecoveryEmail", "mailForwardAddress", "e-mail", "mail"):
+            for mail in ldapParse(lines, tag):
+                if mail and not mail in self.mails and not mail == self.primMail:
+                    self.mails.append(mail)
+        # Collect group membership (for consistency checking, currently unused)
         self.groups = []
-        self.mails.extend(ldapParse(lines, "PasswordRecoveryEmail"))
-        for mail in ldapParse(lines, "e-mail"):
-            if not mail in self.mails:
-                self.mails.append(mail)
-        for mail in ldapParse(lines, "mail"):
-            if not mail in self.mails:
-                self.mails.append(mail)
-        mail = ldapParse(lines, "mailForwardAddress")
-        if mail and not mail[0] in self.mails:
-            self.mails.append(mail[0])
         groups = ldapParse(lines, "groups")
         for gr in groups:
             self.groups.append(ldapAttr(gr, "cn")[0])
@@ -238,8 +236,12 @@ def collectGroups(lUsers, translate = None):
     if len(lines) and last != len(lines) and lines[last].find("cn=") != -1:
         groups.append(ldapGroup(lines[last:]))
     groups = list(filter(lambda x: x.mailAddr is not None, groups))
-    if translate:
-        for g in groups:
+    for g in groups:
+        for rpl in replaceList:
+            if g.mailAddr == rpl[0]:
+                g.mailAddr = rpl[1]
+                continue
+        if translate:
             g.mailAddr = replDomain(g.mailAddr, translate)
     return groups
 
@@ -337,22 +339,26 @@ def completeSubscription(mmUser, mmList):
             break
     # We lack a member subscription. Do it!
     mmList.subscription_policy = SubscriptionPolicy.open
+    memberSubscr = ""
     if not memberSubscribed:
         # May need to first unsubscribe preferred address as nonmember
         prefMem = mmList.nonmembers.get_member(mmUser.preferred_address.email)
         if prefMem:
-            print(" Remove %s as non-member from %s" % (mmUser.preferred_address.email, mmList))
+            print("  Remove %s as non-member from %s" % (mmUser.preferred_address.email, mmList))
             mmList.unsubscription_policy = SubscriptionPolicy.open
             if not testMode2:
                 prefMem.unsubscribe()
             mmList.unsubscription_policy = SubscriptionPolicy.confirm
-        print(" Add %s as member to %s" % (mmUser.preferred_address.email, mmList))
+        print("  Add %s as member to %s" % (mmUser.preferred_address.email, mmList))
         if not testMode2:
             memberSubscribed = mmList.subscribe(mmUser.preferred_address, MemberRole.member)
+        else:
+            memberSubscr = mmUser.preferred_address.email
     # Now we have a member, add all other addresses as non-members
     for mmAddr in mmUser.addresses:
         if not mmList.members.get_member(mmAddr.email) and not mmList.nonmembers.get_member(mmAddr.email):
-            print(" Add %s as non-member to %s" % (mmAddr.email, mmList))
+            if not mmAddr.email == memberSubscr:
+                print("  Add %s as non-member to %s" % (mmAddr.email, mmList))
             if not testMode2:
                 mmSubscr = mmList.subscribe(mmAddr, MemberRole.nonmember)
                 mmSubscr.moderation_action = mmList.default_member_action
@@ -409,11 +415,16 @@ def reconcile(lGroups, mLists):
     for lg in lGroups:
         ml = None
         mml = None
-        if filterList and lg.mailAddr != filterList:
+        # Process filtering
+        if filterList and lg.mailAddr not in filterList:
             continue
+        if excludeList and lg.mailAddr in excludeList:
+            continue
+        if debug:
+            print("Process list %s" % lg.mailAddr)
         # (1) Create new lists from LDAP Groups
         if lg.mailAddr not in mListDict:
-            print("Mailing list %s missing" % lg.mailAddr)
+            print(" Mailing list %s missing, create" % lg.mailAddr)
             if testMode:
                 continue
             #  (1a) Create ML with useful defaults
@@ -425,6 +436,8 @@ def reconcile(lGroups, mLists):
             # (2) For existing lists:
             ml = mListDict[lg.mailAddr]
             mml = getML(lg.mailAddr)
+        if debug:
+            print(" Check for missing subscribers on list %s" % lg.mailAddr)
         for lUser in lg.userList:
             #  (2a) Ensure that user identified by luser is properly subscribed
             #  - subscribed as member with at least one address (preferrably the primary)
@@ -433,7 +446,7 @@ def reconcile(lGroups, mLists):
             #  -> Create a new MM user with main address 
             mmUser = findMMUser(lUser)
             if not mmUser:
-                print(" Create User %s <%s>" % (lUser.dName, lUser.primMail))
+                print("  Create User %s <%s>" % (lUser.dName, lUser.primMail))
                 ml.mlMembers.append(lUser.primMail)
                 if not testMode2:
                     mmUser = userManager.make_user(lUser.primMail, lUser.dName)
@@ -446,6 +459,8 @@ def reconcile(lGroups, mLists):
             #  -> Check subscription and add missing ones (if any)
             completeSubscription(mmUser, mml)
         #  (2c) Any extra subscribers (members) that should be removed?
+        if debug and not noDelete:
+            print(" Check for spurious subscribers on list %s" % lg.mailAddr)
         extra = []
         for member in ml.mlMembers:
             foundPrim = False
@@ -470,9 +485,9 @@ def reconcile(lGroups, mLists):
 
             if not foundPrim:
                 if not foundAny:
-                    print("Subscriber %s should be removed from list %s" % (member, lg.mailAddr))
+                    print("  Subscriber %s should be removed from list %s" % (member, lg.mailAddr))
                 else:
-                    print("Subscriber %s needs to change to %s for list %s" % (member, foundAny, lg.mailAddr))
+                    print("  Subscriber %s needs to change to %s for list %s" % (member, foundAny, lg.mailAddr))
                 if noDelete or testMode2:
                     continue 
                 if foundAny:
@@ -491,8 +506,8 @@ def reconcile(lGroups, mLists):
     pass
 
 def usage(ret):
-    print("Usage: ucs2mailman.py [-d] [-n] [-h] [-a adminMail] [-t DOMAIN] [-p PREFIX] [-f LIST]")
-    print("                      [-u FILE] [-g FILE]")
+    print("Usage: ucs2mailman.py [-d] [-n] [-h] [-a adminMail] [-t DOMAIN] [-p PREFIX]")
+    print("       [-r SRC,DST [-r ...] [-f LIST[,LIST]] [-x LIST[,LIST]] [-u FILE] [-g FILE]")
     print("(c) Kurt Garloff <garloff@osb-alliance.com>, 9/2021, AGPL-v3")
     print("ucs2mailman.py calls udm to get lists of groups and users from UCS LDAP.")
     print("Alternatively it can also process ldapsearch output (ldapsearch -o \"ldif-wrap=255\"),")
@@ -505,27 +520,30 @@ def usage(ret):
     print("will be removed (unless -k is given), extra non-members are left alone.")
     print("Extra lists are also left alone.")
     print("Note that you will typically need to run this as root (with sudo).")
-    print("Options: -d   => debug output")
-    print(" -n           => don't do any changes to MailMan, just print actions")
-    print(" -k           => keep subscribers, don't delete, just print actions")
-    print(" -h           => output this help an exit")
-    print(" -a adminMail => use this user as owner/moderator for newly created lists (must exist!)")
-    print(" -t DOMAIN    => replace mailAddress domain with DOMAIN for the ML")
-    print(" -p PREFIX    => prepend prefix to mailing list names")
-    print(" -f LIST      => only process mailing list LIST (matching happens after applying -p/-t)")
-    print(" -u FILE      => use user  list from file (ldif) instead of calling udm")
-    print(" -g FILE      => use group list from file (ldif) instead of calling udm")
-    print(" -s user      => switch ID (uid and gid) to to user (name) for mm3 config, default list")
+    print("Options: -d     => debug output")
+    print(" -n             => don't do any changes to MailMan, just print actions")
+    print(" -k             => keep subscribers, only add, don't delete (but print)")
+    print(" -h             => output this help an exit")
+    print(" -a adminMail   => use this user as owner/moderator for newly created lists (must exist!)")
+    print(" -p PREFIX      => prepend prefix to mailing list names")
+    print(" -r SRC,DST     => replace ML name SRC with DST (after -p, skips -t), can be used multiple times")
+    print(" -t DOMAIN      => replace mailAddress domain with DOMAIN for the ML")
+    print(" -f LIST[,LIST] => only process mailing list LIST(s) (matching happens after applying -p/-r/-t)")
+    print(" -x LIST[,LIST] => do not process mailing list LIST(s) (matching happens after applying -p/-r/-t)")
+    print(" -u FILE        => use user  list from file (ldif) instead of calling udm")
+    print(" -g FILE        => use group list from file (ldif) instead of calling udm")
+    print(" -s user        => switch ID (uid and gid) to to user (name) for mm3 config, default list")
     sys.exit(ret)
 
 def main(argv):
-    global debug, testMode, testMode2, noDelete, admin, filterList, prefix, userFile, groupFile
+    global debug, testMode, testMode2, noDelete, admin, prefix, userFile, groupFile
+    global filterList, excludeList, replaceList
     global userManager
     translate = None
     identity = "list"
     # TODO: Use getopt
     try:
-        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNa:t:f:p:u:g:s:')
+        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNka:t:f:x:p:u:g:s:r:')
     except getopt.GetoptError as exc:
         print(exc)
         usage(1)
@@ -555,7 +573,13 @@ def main(argv):
             prefix = arg
             continue
         if opt == "-f":
-            filterList = arg
+            filterList = arg.split(",")
+            continue
+        if opt == "-x":
+            excludeList = arg.split(",")
+            continue
+        if opt == "-r":
+            replaceList.append(arg.split(","))
             continue
         if opt == "-u":
             userFile = arg
