@@ -12,8 +12,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 
-if test /var/list/udm.groups -nt stamp; then
-	ucs2mailman.py -a ADMIN@DOMAIN -t MLDOMAIN -u /var/list/udm.users -g /var/list/udm.groups && touch stamp
+cd /var/list
+if test udm.groups -nt stamp; then
+	ucs2mailman.py -a ADMIN@DOMAIN -t MLDOMAIN -u udm.users -g udm.groups && touch stamp
 fi
 
 
