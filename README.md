@@ -99,3 +99,34 @@ We could filter group changes and implement a ``postrun`` action. This
 would seem cleaner than looking at the database file every few minutes
 from a cron job.
 
+## Output from ``-h``
+
+``
+Usage: ucs2mailman.py [-d] [-n] [-h] [-a adminMail] [-t DOMAIN] [-p PREFIX]
+       [-r SRC,DST [-r ...] [-f LIST[,LIST]] [-x LIST[,LIST]] [-u FILE] [-g FILE]
+(c) Kurt Garloff <garloff@osb-alliance.com>, 9/2021, AGPL-v3
+ucs2mailman.py calls udm to get lists of groups and users from UCS LDAP.
+Alternatively it can also process ldapsearch output (ldapsearch -o "ldif-wrap=255"),
+ see options -u -g to read UDM/ldapsearch output from files.
+It then gets the mailing list with subscribers and nonMembers from Mailman3.
+It then ensures that all LDAP groups with mailAddress have a corresponding
+MailMan3 mailing list (ML) and that all group members are subscribed to it
+and all other known mail addresses from subscribers are added as non-members
+to allow them to have unmoderated posting. Extra subscribers (not in LDAP group)
+will be removed (unless -k is given), extra non-members are left alone.
+Extra lists are also left alone.
+Note that you will typically need to run this as root (with sudo).
+Options: -d     => debug output
+ -n             => don't do any changes to MailMan, just print actions
+ -k             => keep subscribers, only add, don't delete (but print)
+ -h             => output this help an exit
+ -a adminMail   => use this user as owner/moderator for newly created lists (must exist!)
+ -p PREFIX      => prepend prefix to mailing list names
+ -r SRC,DST     => replace ML name SRC with DST (after -p, skips -t), can be used multiple times
+ -t DOMAIN      => replace mailAddress domain with DOMAIN for the ML
+ -f LIST[,LIST] => only process mailing list LIST(s) (matching happens after applying -p/-r/-t)
+ -x LIST[,LIST] => do not process mailing list LIST(s) (matching happens after applying -p/-r/-t)
+ -u FILE        => use user  list from file (ldif) instead of calling udm
+ -g FILE        => use group list from file (ldif) instead of calling udm
+ -s user        => switch ID (uid and gid) to to user (name) for mm3 config, default list
+``
