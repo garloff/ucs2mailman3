@@ -101,7 +101,7 @@ from a cron job.
 
 ## Output from ``-h``
 
-`
+<pre>
 Usage: ucs2mailman.py [-d] [-n] [-h] [-a adminMail] [-t DOMAIN] [-p PREFIX]
        [-r SRC,DST [-r ...] [-f LIST[,LIST]] [-x LIST[,LIST]] [-u FILE] [-g FILE]
 (c) Kurt Garloff <garloff@osb-alliance.com>, 9/2021, AGPL-v3
@@ -129,4 +129,4 @@ Options: -d     => debug output
  -u FILE        => use user  list from file (ldif) instead of calling udm
  -g FILE        => use group list from file (ldif) instead of calling udm
  -s user        => switch ID (uid and gid) to to user (name) for mm3 config, default list
-`
+</pre>
