@@ -18,6 +18,7 @@ debug = False
 testMode = False
 testMode2 = False
 noDelete = False
+nested = True
 filterList = []
 excludeList = []
 replaceList = []
@@ -244,6 +245,10 @@ def collectGroups(lUsers, translate = None):
         if translate:
             g.mailAddr = replDomain(g.mailAddr, translate)
     return groups
+
+def recurseNestedGroups(lUsers, lGroups):
+    "Include users from nested groups"
+    pass
 
 # global MM context
 domManager = None
@@ -522,6 +527,7 @@ def usage(ret):
     print("Note that you will typically need to run this as root (with sudo).")
     print("Options: -d     => debug output")
     print(" -n             => don't do any changes to MailMan, just print actions")
+    print(" -R             => DON'T recurseively include nested group members")
     print(" -k             => keep subscribers, only add, don't delete (but print)")
     print(" -h             => output this help an exit")
     print(" -a adminMail   => use this user as owner/moderator for newly created lists (must exist!)")
@@ -537,13 +543,13 @@ def usage(ret):
 
 def main(argv):
     global debug, testMode, testMode2, noDelete, admin, prefix, userFile, groupFile
-    global filterList, excludeList, replaceList
+    global filterList, excludeList, replaceList, nested
     global userManager
     translate = None
     identity = "list"
     # TODO: Use getopt
     try:
-        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNka:t:f:x:p:u:g:s:r:')
+        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNRka:t:f:x:p:u:g:s:r:')
     except getopt.GetoptError as exc:
         print(exc)
         usage(1)
@@ -559,6 +565,9 @@ def main(argv):
             continue
         if opt == "-N":
             testMode2 = True
+            continue
+        if opt == "-R":
+            nested = False
             continue
         if opt == "-k":
             noDelete = True
@@ -593,6 +602,8 @@ def main(argv):
 
     lUsers = collectUsers()
     lGroups = collectGroups(lUsers, translate)
+    if nested:
+        recurseNestedGroups(lUsers, lGroups)
     # Debugging: Dump info
     for lg in lGroups:
         assert(lg.mailAddr is not None)
