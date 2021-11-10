@@ -141,6 +141,7 @@ class ldapGroup:
             mailAddr = ldapParse(lines, "mailPrimaryAddress")
         if mailAddr and mailAddr[0] != "None":
             self.mailAddr = prefix+mailAddr[0]
+        self.nestedGroups = ldapParse(lines, "nestedGroup")
         users = ldapParse(lines, "users")
         if not users:
             users = ldapParse(lines, "uniqueMember")
