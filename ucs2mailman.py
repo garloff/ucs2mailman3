@@ -18,7 +18,7 @@ debug = False
 testMode = False
 testMode2 = False
 noDelete = False
-nested = True
+nested = 1
 filterList = []
 excludeList = []
 replaceList = []
@@ -247,9 +247,28 @@ def collectGroups(lUsers, translate = None):
             g.mailAddr = replDomain(g.mailAddr, translate)
     return groups
 
-def recurseNestedGroups(lUsers, lGroups):
+def addtoGroup(grp, ngrp, nest):
+    "Add members of ngrp to grp"
+    # Special function: Subscribe groups to groups
+    if nest < 0:
+        if ngrp.mailAddr:
+            grp.userList.append(ngrp.mailAddr)
+        return
+    # Add missing users
+    for user in ngrp.userList:
+        if not user in grp.userList:
+            grp.userList.append(user)
+    # Recursion
+    if nest > 0:
+        for nngrp in ngrp.nestedGroups:
+            addtoGroup(grp, nngrp, nest-1)
+
+
+def recurseNestedGroups(lUsers, lGroups, nesting):
     "Include users from nested groups"
-    pass
+    for group in lGroups:
+        for nGroup in group.nestedGroups:
+            addtoGroup(group, nGroup, nesting-1)
 
 # global MM context
 domManager = None
@@ -528,7 +547,7 @@ def usage(ret):
     print("Note that you will typically need to run this as root (with sudo).")
     print("Options: -d     => debug output")
     print(" -n             => don't do any changes to MailMan, just print actions")
-    print(" -R             => DON'T recurseively include nested group members")
+    print(" -R N           => recursively include members from nested groups up to level N (default: 1)")
     print(" -k             => keep subscribers, only add, don't delete (but print)")
     print(" -h             => output this help an exit")
     print(" -a adminMail   => use this user as owner/moderator for newly created lists (must exist!)")
@@ -550,7 +569,7 @@ def main(argv):
     identity = "list"
     # TODO: Use getopt
     try:
-        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNRka:t:f:x:p:u:g:s:r:')
+        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNka:t:f:x:p:u:g:s:r:R:')
     except getopt.GetoptError as exc:
         print(exc)
         usage(1)
@@ -568,7 +587,7 @@ def main(argv):
             testMode2 = True
             continue
         if opt == "-R":
-            nested = False
+            nested = int(arg)
             continue
         if opt == "-k":
             noDelete = True
@@ -604,7 +623,7 @@ def main(argv):
     lUsers = collectUsers()
     lGroups = collectGroups(lUsers, translate)
     if nested:
-        recurseNestedGroups(lUsers, lGroups)
+        recurseNestedGroups(lUsers, lGroups, nested)
     # Debugging: Dump info
     for lg in lGroups:
         assert(lg.mailAddr is not None)
