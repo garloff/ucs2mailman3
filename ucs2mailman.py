@@ -260,7 +260,11 @@ def addtoGroup(lGroups, grp, ngrp, nest):
     # Special function: Subscribe groups to groups
     if nest < 0:
         if ngrp.mailAddr:
-            grp.userList.append(ngrp.mailAddr)
+            print(ngrp.mailAddr)
+            user = ldapUser(("uid=%s,dc=%s" % tuple(ngrp.mailAddr.split("@")),))
+            user.dName = "%s mailing list" % ngrp.mailAddr
+            user.primMail = ngrp.mailAddr
+            grp.userList.append(user)
         return
     # Add missing users
     for user in ngrp.userList:
@@ -487,6 +491,7 @@ def reconcile(lGroups, mLists):
                 ml.mlMembers.append(lUser.primMail)
                 if not testMode2:
                     mmUser = userManager.make_user(lUser.primMail, lUser.dName)
+                    assert(mmUser)
                     pref = list(mmUser.addresses)[0]
                     pref.verified_on = now()
                     mmUser.preferred_address = pref
