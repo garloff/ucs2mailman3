@@ -247,7 +247,15 @@ def collectGroups(lUsers, translate = None):
             g.mailAddr = replDomain(g.mailAddr, translate)
     return groups
 
-def addtoGroup(grp, ngrp, nest):
+def findGroup(lGroups, cn):
+    shortCN = ldapAttr(cn, "cn")[0]
+    for grp in lGroups:
+        if grp.cn == shortCN:
+            return grp
+    print("WARNING: Referenced nested group \"%s\" not found" % cn, file=sys.stderr)
+    return None
+
+def addtoGroup(lGroups, grp, ngrp, nest):
     "Add members of ngrp to grp"
     # Special function: Subscribe groups to groups
     if nest < 0:
@@ -260,15 +268,19 @@ def addtoGroup(grp, ngrp, nest):
             grp.userList.append(user)
     # Recursion
     if nest > 0:
-        for nngrp in ngrp.nestedGroups:
-            addtoGroup(grp, nngrp, nest-1)
+        for nnGrp in ngrp.nestedGroups:
+            if nngrp != grp.cn:
+                nnGroup = findGroup(lGroups, nnGrp)
+                addtoGroup(lGroups, grp, nnGroup, nest-1)
 
 
 def recurseNestedGroups(lUsers, lGroups, nesting):
     "Include users from nested groups"
     for group in lGroups:
-        for nGroup in group.nestedGroups:
-            addtoGroup(group, nGroup, nesting-1)
+        for nGrp in group.nestedGroups:
+            nGroup = findGroup(lGroups, nGrp)
+            if nGroup and group.mailAddr:
+                addtoGroup(lGroups, group, nGroup, nesting-1)
 
 # global MM context
 domManager = None
