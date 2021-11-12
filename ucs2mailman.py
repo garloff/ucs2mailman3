@@ -18,6 +18,7 @@ debug = False
 testMode = False
 testMode2 = False
 noDelete = False
+nested = 1
 filterList = []
 excludeList = []
 replaceList = []
@@ -140,6 +141,7 @@ class ldapGroup:
             mailAddr = ldapParse(lines, "mailPrimaryAddress")
         if mailAddr and mailAddr[0] != "None":
             self.mailAddr = prefix+mailAddr[0]
+        self.nestedGroups = ldapParse(lines, "nestedGroup")
         users = ldapParse(lines, "users")
         if not users:
             users = ldapParse(lines, "uniqueMember")
@@ -244,6 +246,45 @@ def collectGroups(lUsers, translate = None):
         if translate:
             g.mailAddr = replDomain(g.mailAddr, translate)
     return groups
+
+def findGroup(lGroups, cn):
+    shortCN = ldapAttr(cn, "cn")[0]
+    for grp in lGroups:
+        if grp.cn == shortCN:
+            return grp
+    print("WARNING: Referenced nested group \"%s\" not found" % cn, file=sys.stderr)
+    return None
+
+def addtoGroup(lGroups, grp, ngrp, nest):
+    "Add members of ngrp to grp"
+    # Special function: Subscribe groups to groups
+    if nest < 0:
+        if ngrp.mailAddr:
+            print(ngrp.mailAddr)
+            user = ldapUser(("uid=%s,dc=%s" % tuple(ngrp.mailAddr.split("@")),))
+            user.dName = "%s mailing list" % ngrp.mailAddr
+            user.primMail = ngrp.mailAddr
+            grp.userList.append(user)
+        return
+    # Add missing users
+    for user in ngrp.userList:
+        if not user in grp.userList:
+            grp.userList.append(user)
+    # Recursion
+    if nest > 0:
+        for nnGrp in ngrp.nestedGroups:
+            if nngrp != grp.cn:
+                nnGroup = findGroup(lGroups, nnGrp)
+                addtoGroup(lGroups, grp, nnGroup, nest-1)
+
+
+def recurseNestedGroups(lUsers, lGroups, nesting):
+    "Include users from nested groups"
+    for group in lGroups:
+        for nGrp in group.nestedGroups:
+            nGroup = findGroup(lGroups, nGrp)
+            if nGroup and group.mailAddr:
+                addtoGroup(lGroups, group, nGroup, nesting-1)
 
 # global MM context
 domManager = None
@@ -450,6 +491,7 @@ def reconcile(lGroups, mLists):
                 ml.mlMembers.append(lUser.primMail)
                 if not testMode2:
                     mmUser = userManager.make_user(lUser.primMail, lUser.dName)
+                    assert(mmUser)
                     pref = list(mmUser.addresses)[0]
                     pref.verified_on = now()
                     mmUser.preferred_address = pref
@@ -522,6 +564,7 @@ def usage(ret):
     print("Note that you will typically need to run this as root (with sudo).")
     print("Options: -d     => debug output")
     print(" -n             => don't do any changes to MailMan, just print actions")
+    print(" -R N           => recursively include members from nested groups up to level N (default: 1)")
     print(" -k             => keep subscribers, only add, don't delete (but print)")
     print(" -h             => output this help an exit")
     print(" -a adminMail   => use this user as owner/moderator for newly created lists (must exist!)")
@@ -537,13 +580,13 @@ def usage(ret):
 
 def main(argv):
     global debug, testMode, testMode2, noDelete, admin, prefix, userFile, groupFile
-    global filterList, excludeList, replaceList
+    global filterList, excludeList, replaceList, nested
     global userManager
     translate = None
     identity = "list"
     # TODO: Use getopt
     try:
-        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNka:t:f:x:p:u:g:s:r:')
+        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNka:t:f:x:p:u:g:s:r:R:')
     except getopt.GetoptError as exc:
         print(exc)
         usage(1)
@@ -559,6 +602,9 @@ def main(argv):
             continue
         if opt == "-N":
             testMode2 = True
+            continue
+        if opt == "-R":
+            nested = int(arg)
             continue
         if opt == "-k":
             noDelete = True
@@ -593,6 +639,8 @@ def main(argv):
 
     lUsers = collectUsers()
     lGroups = collectGroups(lUsers, translate)
+    if nested:
+        recurseNestedGroups(lUsers, lGroups, nested)
     # Debugging: Dump info
     for lg in lGroups:
         assert(lg.mailAddr is not None)
