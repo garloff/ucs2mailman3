@@ -44,6 +44,7 @@ from mailman.interfaces.domain import IDomainManager
 #from mailman.interfaces.domain import IMailingList
 from mailman.interfaces.styles import IStyleManager
 from mailman.interfaces.member import MemberRole
+from mailman.interfaces.address import AddressAlreadyLinkedError
 from mailman.app.lifecycle import create_list
 from mailman.testing.helpers import subscribe
 
@@ -105,7 +106,7 @@ class ldapUser:
         self.mails = []
         for tag in ("PasswordRecoveryEmail", "mailForwardAddress", "e-mail", "mail"):
             for mail in ldapParse(lines, tag):
-                if mail and not mail in self.mails and not mail == self.primMail:
+                if mail and not mail in self.mails and not mail == self.primMail and not mail == "None":
                     self.mails.append(mail)
         # Collect group membership (for consistency checking, currently unused)
         self.groups = []
@@ -357,10 +358,14 @@ def completeMMUser(mmUser, lUser, dName):
     for addr in lUser.mails:
         if not mmUser.controls(addr.lower()):
             print(" Add 2ndary %s <%s> to User %s" % (dName, addr, mmUser))
+            if debug:
+                print("  Already available addresses: %s " % mmUser.addresses)
             if not testMode2:
                 try:
                     newAddr = mmUser.register(addr, dName)
                     newAddr.verified_on = now()
+                except AddressAlreadyLinkedError as exc:
+                    print(" Uhh, already linked ...")
                 except BaseException as exc:
                     print("ERROR: %s %s" % (type(exc), exc), file = sys.stderr)
     if not mmUser.preferred_address:
