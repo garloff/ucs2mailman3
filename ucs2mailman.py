@@ -18,6 +18,7 @@ debug = False
 testMode = False
 testMode2 = False
 noDelete = False
+delDomain = None
 nested = 1
 filterList = []
 excludeList = []
@@ -365,7 +366,7 @@ def completeMMUser(mmUser, lUser, dName):
                     newAddr = mmUser.register(addr, dName)
                     newAddr.verified_on = now()
                 except AddressAlreadyLinkedError as exc:
-                    print(" Uhh, already linked ...")
+                    print("  ... already subscribed ...")
                 except BaseException as exc:
                     print("ERROR: %s %s" % (type(exc), exc), file = sys.stderr)
     if not mmUser.preferred_address:
@@ -454,6 +455,14 @@ def removeAll(mList, mUser):
     mList.unsubscription_policy = SubscriptionPolicy.confirm
 
 
+def addrDomain(addr, dom):
+    "returns true if addr is in domain dom"
+    atpos = addr.find('@')
+    if atpos == -1:
+        return False
+    return addr[atpos+1:].lower() == dom.lower()
+
+
 def reconcile(lGroups, mLists):
     "Reconcile Mailman3 lists with input from LDAP"
     # Now: Reconciliation steps
@@ -536,7 +545,9 @@ def reconcile(lGroups, mLists):
                 else:
                     print("  Subscriber %s needs to change to %s for list %s" % (member, foundAny, lg.mailAddr))
                 if noDelete or testMode2:
-                    continue 
+                    continue
+                if delDomain and not addrDomain(member, delDomain):
+                    continue
                 if foundAny:
                     # Case (2c1) We find other MM mail addresses from that user in the group
                     # In this case: Ensure that the preferred_address is one from LDAP
@@ -548,12 +559,13 @@ def reconcile(lGroups, mLists):
                     # mails from MM and remove the nonmembers as well. (This may be incomplete
                     # and that's fine.)
                     removeAll(mml, unsubUser)
+                    print("  ... removed %s" % member)
         # Note: Extra nonMembers are OK
     # Note: Extra lists are OK
     pass
 
 def usage(ret):
-    print("Usage: ucs2mailman.py [-d] [-n] [-h] [-a adminMail] [-t DOMAIN] [-p PREFIX]")
+    print("Usage: ucs2mailman.py [-d] [-n] [-h] [-k] [-R N] [-a adminMail] [-t DOMAIN] [-p PREFIX]")
     print("       [-r SRC,DST [-r ...] [-f LIST[,LIST]] [-x LIST[,LIST]] [-u FILE] [-g FILE]")
     print("(c) Kurt Garloff <garloff@osb-alliance.com>, 9/2021, AGPL-v3")
     print("ucs2mailman.py calls udm to get lists of groups and users from UCS LDAP.")
@@ -571,6 +583,7 @@ def usage(ret):
     print(" -n             => don't do any changes to MailMan, just print actions")
     print(" -R N           => recursively include members from nested groups up to level N (default: 1)")
     print(" -k             => keep subscribers, only add, don't delete (but print)")
+    print(" -K DOMAIN      => like -k, but remove nonexistent users from DOMAIN")
     print(" -h             => output this help an exit")
     print(" -a adminMail   => use this user as owner/moderator for newly created lists (must exist!)")
     print(" -p PREFIX      => prepend prefix to mailing list names")
@@ -586,12 +599,12 @@ def usage(ret):
 def main(argv):
     global debug, testMode, testMode2, noDelete, admin, prefix, userFile, groupFile
     global filterList, excludeList, replaceList, nested
-    global userManager
+    global userManager, delDomain
     translate = None
     identity = "list"
     # TODO: Use getopt
     try:
-        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNka:t:f:x:p:u:g:s:r:R:')
+        (optlist, args) = getopt.gnu_getopt(argv[1:], 'hdnNka:t:f:x:p:u:g:s:r:R:K:')
     except getopt.GetoptError as exc:
         print(exc)
         usage(1)
@@ -613,6 +626,9 @@ def main(argv):
             continue
         if opt == "-k":
             noDelete = True
+            continue
+        if opt == "-K":
+            delDomain = arg
             continue
         if opt == "-a":
             admin = arg
