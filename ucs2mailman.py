@@ -321,6 +321,10 @@ def createML(lGroup):
     mList.subscription_policy = SubscriptionPolicy.open
     # admin MUST exist (and have confirmed mailaddress)
     adminUser = userManager.get_user(admin)
+    if not adminUser:
+        print(f"FATAL: No account found for {admin}")
+        # FIXME: Can we create a user on the fly with admin
+        # being a valid mail address?
     assert(adminUser)
     adminAddr = userManager.get_address(admin)
     adminUser.preferred_address = adminAddr
