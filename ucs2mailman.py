@@ -41,6 +41,7 @@ from mailman.interfaces.usermanager import IUserManager
 from mailman.interfaces.listmanager import IListManager
 from mailman.interfaces.subscriptions import ISubscriptionManager
 from mailman.interfaces.mailinglist import SubscriptionPolicy
+from mailman.interfaces.mailinglist import DMARCMitigateAction
 from mailman.interfaces.domain import IDomainManager
 #from mailman.interfaces.domain import IMailingList
 from mailman.interfaces.styles import IStyleManager
@@ -333,6 +334,9 @@ def createML(lGroup):
     # Close for subscription/unsubscription
     mList.subscription_policy = SubscriptionPolicy.moderate
     mList.unsubscription_policy = SubscriptionPolicy.confirm
+    # Munge_From DMARC mitigation (conditional)
+    mList.dmarc_mitigate_action = DMARCMitigateAction.munge_from
+    mList.dmarc_mitigate_unconditionally = False
     # Settings: Invisible
     mList.advertised = False
     mList.description = "LDAP group %s" % lGroup.cn
